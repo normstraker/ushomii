@@ -1,14 +1,83 @@
 <!doctype html>
 <html lang="en">
+<!doctype html>
+<html lang="en">
   <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Chess Lab</title>
+
+    <!-- chessboard.js (UI board) + deps -->
+    <link
+      rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css"
+    />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+
+    <!-- chess.js (rules / legality / FEN) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/1.0.0/chess.min.js"></script>
+
     <link rel="stylesheet" href="styles.css" />
   </head>
+
   <body>
-    <h1>Chess Lab</h1>
-    <p>If you can see this, /chess-lab is working.</p>
-    <script src="script.js"></script>
+    <div class="page">
+      <header class="topbar">
+        <div class="title">Chess Lab</div>
+        <div class="subtitle">Stockfish + ELO slider</div>
+      </header>
+
+      <main class="content">
+        <section class="board-wrap">
+          <div id="board" class="board"></div>
+          <div class="status" id="status"></div>
+        </section>
+
+        <aside class="panel">
+          <div class="card">
+            <div class="card-title">Opponent Strength</div>
+
+            <label class="label-row" for="elo">
+              <span>ELO</span>
+              <span class="value" id="eloValue">1200</span>
+            </label>
+
+            <input
+              id="elo"
+              type="range"
+              min="400"
+              max="2500"
+              step="50"
+              value="1200"
+            />
+
+            <div class="hint">
+              Change anytime. New strength applies on the engine’s next move.
+            </div>
+
+            <div class="row">
+              <label class="check">
+                <input id="playWhite" type="checkbox" checked />
+                <span>Play as White</span>
+              </label>
+            </div>
+
+            <div class="row">
+              <button id="newGame">New Game</button>
+              <button id="undo">Undo</button>
+              <button id="flip">Flip</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Debug</div>
+            <pre id="debug" class="debug"></pre>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script src="app.js"></script>
   </body>
 </html>
