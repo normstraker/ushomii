@@ -22,15 +22,18 @@ function logDebug(line) {
 }
 
 function initStockfish() {
-  sf = new Worker("stockfish.js");
+  // You downloaded stockfish.wasm + stockfish.worker.js, so use the worker directly.
+  sf = new Worker("engine/stockfish.worker.js");
+
+  logDebug("Stockfish worker created.");
 
   sf.onmessage = e => {
     const line = String(e.data);
-    // logDebug(line);
+    if (!line.startsWith("info")) logDebug(line);
 
     if (line.startsWith("bestmove")) {
       const parts = line.split(/\s+/);
-      const best = parts[1]; // e.g. e2e4 or (none)
+      const best = parts[1];
       engineBusy = false;
 
       if (pendingBestMoveResolver) {
@@ -41,7 +44,6 @@ function initStockfish() {
     }
   };
 
-  // UCI init
   sf.postMessage("uci");
   sf.postMessage("isready");
   applyEloToEngine(Number($elo.value));
@@ -50,14 +52,18 @@ function initStockfish() {
 function applyEloToEngine(elo) {
   if (!sf) return;
 
-  // Stockfish supports this pattern on most builds:
-  // - enable limit strength
-  // - set target elo
   sf.postMessage("setoption name UCI_LimitStrength value true");
   sf.postMessage(`setoption name UCI_Elo value ${elo}`);
-  sf.postMessage("isready");
 
-  logDebug(`Applied ELO: ${elo}`);
+  // Fallback: map ELO 400..2500 -> Skill 0..20
+  const skill = Math.max(
+    0,
+    Math.min(20, Math.round(((elo - 400) / (2500 - 400)) * 20)),
+  );
+  sf.postMessage(`setoption name Skill Level value ${skill}`);
+
+  sf.postMessage("isready");
+  logDebug(`Applied ELO: ${elo} (skill ${skill})`);
 }
 
 function getEngineMove({ movetimeMs = 200 } = {}) {
@@ -65,7 +71,10 @@ function getEngineMove({ movetimeMs = 200 } = {}) {
     if (!sf) throw new Error("Stockfish not initialized.");
 
     // If engine is busy, ignore (simple guard)
-    if (engineBusy) return;
+    if (engineBusy) {
+      resolve("(busy)");
+      return;
+    }
 
     engineBusy = true;
     pendingBestMoveResolver = resolve;
@@ -113,7 +122,7 @@ async function maybeEnginePlays() {
   const movetimeMs = Math.round(80 + (elo - 400) * 0.12); // ~80..~332
   const best = await getEngineMove({ movetimeMs });
 
-  if (!best || best === "(none)") return;
+  if (!best || best === "(none)" || best === "(busy)") return;
 
   // Convert UCI move (e2e4) to chess.js move
   const from = best.slice(0, 2);
@@ -166,7 +175,7 @@ $elo.addEventListener("input", () => {
 
 $elo.addEventListener("change", () => {
   applyEloToEngine(Number($elo.value));
-  // Note: change applies to engine’s next move automatically
+  if (engineBusy) sf.postMessage("stop");
 });
 
 $playWhite.addEventListener("change", () => {
