@@ -7,6 +7,7 @@ let board = null;
 
 const $status = document.getElementById("status");
 const $debug = document.getElementById("debug");
+const $moves = document.getElementById("moves");
 const $elo = document.getElementById("elo");
 const $eloValue = document.getElementById("eloValue");
 const $newGame = document.getElementById("newGame");
@@ -26,6 +27,9 @@ function logDebug(line) {
     0,
     4000,
   );
+}
+function clearDebug() {
+  if ($debug) $debug.textContent = "";
 }
 
 // ---------- Stockfish worker ----------
@@ -220,11 +224,20 @@ function onDragStart(source, piece) {
   const humanIsWhite = $playWhite.checked;
   if (humanIsWhite && piece.startsWith("b")) return false;
   if (!humanIsWhite && piece.startsWith("w")) return false;
+  selectedSquare = source;
+  highlightMovesFrom(source);
 
   return true;
 }
 
 function onDrop(source, target) {
+  // If you drop it back where you picked it up, treat it like "changed my mind"
+  if (source === target) {
+    clearHighlights();
+    selectedSquare = null;
+    return;
+  }
+
   const move = game.move({
     from: source,
     to: target,
@@ -234,11 +247,15 @@ function onDrop(source, target) {
   if (move === null) return "snapback";
 
   updateStatus();
+  renderMoveList();
+
   setTimeout(maybeEnginePlays, 0);
 }
 
 function onSnapEnd() {
   board.position(game.fen());
+  clearHighlights();
+  selectedSquare = null;
 }
 
 // ---------- Controls ----------
@@ -265,6 +282,7 @@ $undo.addEventListener("click", () => {
 
   board.position(game.fen(), true);
   updateStatus();
+  renderMoveList();
 });
 
 $flip.addEventListener("click", () => {
@@ -275,6 +293,8 @@ function startNewGame() {
   game = new Chess();
   board.start(true);
   updateStatus();
+  renderMoveList();
+  clearDebug();
 
   // Reset engine for new game
   if (sf) {
@@ -290,6 +310,56 @@ function startNewGame() {
   setTimeout(maybeEnginePlays, 0);
 }
 
+// --- Move highlighting / click-to-select ---
+let selectedSquare = null;
+
+function clearHighlights() {
+  // chessboard.js uses jQuery squares with classes like "square-55d63"
+  // We remove our custom highlight classes from all squares.
+  $("#board .square-55d63").removeClass(
+    "square-highlight square-highlight-from",
+  );
+}
+let lastMoveSquares = null; // { from: "e2", to: "e4" }
+
+function clearLastMoveHighlight() {
+  $("#board .square-55d63").removeClass("square-last-from square-last-to");
+  lastMoveSquares = null;
+}
+
+function highlightLastMove(from, to) {
+  clearLastMoveHighlight();
+
+  $(`#board .square-55d63[data-square="${from}"]`).addClass("square-last-from");
+  $(`#board .square-55d63[data-square="${to}"]`).addClass("square-last-to");
+
+  lastMoveSquares = { from, to };
+}
+
+function highlightMovesFrom(square) {
+  clearHighlights();
+
+  // highlight the "from" square
+  $(`#board .square-55d63[data-square="${square}"]`).addClass(
+    "square-highlight-from",
+  );
+
+  // get legal moves from chess.js
+  const moves = game.moves({ square, verbose: true });
+  for (const m of moves) {
+    $(`#board .square-55d63[data-square="${m.to}"]`).addClass(
+      "square-highlight",
+    );
+  }
+}
+
+function isHumanPieceOn(square) {
+  const piece = game.get(square);
+  if (!piece) return false;
+  const humanColor = $playWhite.checked ? "w" : "b";
+  return piece.color === humanColor;
+}
+
 // ---------- Init ----------
 function initBoard() {
   board = Chessboard("board", {
@@ -300,6 +370,68 @@ function initBoard() {
     onDrop,
     onSnapEnd,
   });
+
+  // ---- ADD THIS BLOCK RIGHT HERE ----
+  $("#board").on("click", ".square-55d63", function () {
+    if (game.isGameOver()) return;
+    if (!isHumansTurn()) return;
+
+    const square = $(this).attr("data-square");
+
+    // Nothing selected yet → select a piece
+    if (!selectedSquare) {
+      if (!isHumanPieceOn(square)) return;
+      selectedSquare = square;
+      highlightMovesFrom(square);
+      return;
+    }
+
+    // Clicking same square again → put it back down
+    if (selectedSquare === square) {
+      clearHighlights();
+      selectedSquare = null;
+      return;
+    }
+
+    // Try move
+    const move = game.move({
+      from: selectedSquare,
+      to: square,
+      promotion: "q",
+    });
+
+    if (move === null) return;
+
+    board.position(game.fen(), true);
+    updateStatus();
+    renderMoveList();
+
+    clearHighlights();
+    selectedSquare = null;
+    setTimeout(maybeEnginePlays, 0);
+  });
+  // ---- END OF ADDED BLOCK ----
+}
+function renderMoveList() {
+  if (!$moves) return;
+
+  const hist = game.history();
+
+  let out = "";
+  for (let i = 0; i < hist.length; i += 2) {
+    const moveNum = i / 2 + 1;
+    const white = hist[i] || "";
+    const black = hist[i + 1] || "";
+    out += `${moveNum}. ${white.padEnd(8, " ")} ${black}\n`;
+  }
+
+  $moves.textContent = out.trimEnd();
+
+  // Smooth auto-scroll to newest move
+  $moves.scrollTo({
+    top: $moves.scrollHeight,
+    behavior: "smooth",
+  });
 }
 
 (function main() {
@@ -307,5 +439,9 @@ function initBoard() {
   initStockfish();
   $eloValue.textContent = $elo.value;
   updateStatus();
+  renderMoveList();
+
   setTimeout(maybeEnginePlays, 0);
+  clearHighlights();
+  selectedSquare = null;
 })();
