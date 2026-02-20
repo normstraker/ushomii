@@ -17,12 +17,8 @@ const $playWhite = document.getElementById("playWhite");
 
 // ---------- Debug helper ----------
 function logDebug(line) {
-  // Always log to console too (so we can diagnose even if UI debug fails)
   console.log("DEBUG>", line);
-
-  // If the debug element isn't available for any reason, don't crash the app
   if (!$debug) return;
-
   $debug.textContent = (String(line) + "\n" + $debug.textContent).slice(
     0,
     4000,
@@ -32,12 +28,101 @@ function clearDebug() {
   if ($debug) $debug.textContent = "";
 }
 
+// ---------- Move list ----------
+function renderMoveList() {
+  if (!$moves) return;
+
+  const hist = game.history(); // SAN list
+  let out = "";
+
+  for (let i = 0; i < hist.length; i += 2) {
+    const moveNum = i / 2 + 1;
+    const white = hist[i] || "";
+    const black = hist[i + 1] || "";
+    out += `${moveNum}. ${white.padEnd(8, " ")} ${black}\n`;
+  }
+
+  $moves.textContent = out.trimEnd();
+
+  // Auto-scroll to newest move (smooth)
+  $moves.scrollTo({ top: $moves.scrollHeight, behavior: "smooth" });
+}
+
+// ---------- Board highlights ----------
+let selectedSquare = null;
+
+function clearHighlights() {
+  $("#board .square-55d63").removeClass(
+    "square-highlight square-highlight-from",
+  );
+}
+
+function highlightMovesFrom(square) {
+  clearHighlights();
+
+  $(`#board .square-55d63[data-square="${square}"]`).addClass(
+    "square-highlight-from",
+  );
+
+  const moves = game.moves({ square, verbose: true });
+  for (const m of moves) {
+    $(`#board .square-55d63[data-square="${m.to}"]`).addClass(
+      "square-highlight",
+    );
+  }
+}
+
+function isHumanPieceOn(square) {
+  const piece = game.get(square);
+  if (!piece) return false;
+  const humanColor = $playWhite.checked ? "w" : "b";
+  return piece.color === humanColor;
+}
+
+// Last move highlight
+function clearLastMoveHighlight() {
+  $("#board .square-55d63").removeClass("square-last-from square-last-to");
+}
+
+function highlightLastMove(from, to) {
+  clearLastMoveHighlight();
+  $(`#board .square-55d63[data-square="${from}"]`).addClass("square-last-from");
+  $(`#board .square-55d63[data-square="${to}"]`).addClass("square-last-to");
+}
+
+// Check / checkmate highlight
+function clearCheckHighlight() {
+  $("#board .square-55d63").removeClass("square-check square-checkmate");
+}
+
+function highlightCheck() {
+  clearCheckHighlight();
+
+  if (!game.isCheck()) return;
+
+  const inMate = game.isCheckmate();
+  const turn = game.turn(); // side currently in check
+  const boardState = game.board();
+
+  for (let rank = 0; rank < 8; rank++) {
+    for (let file = 0; file < 8; file++) {
+      const piece = boardState[rank][file];
+      if (piece && piece.type === "k" && piece.color === turn) {
+        const square = "abcdefgh"[file] + (8 - rank);
+        $(`#board .square-55d63[data-square="${square}"]`).addClass(
+          inMate ? "square-checkmate" : "square-check",
+        );
+        return;
+      }
+    }
+  }
+}
+
 // ---------- Stockfish worker ----------
 let sf = null;
 let engineBusy = false;
 let pendingBestMoveResolver = null;
 
-// readiness gate so we don't ask for moves before Stockfish is ready
 let engineReady = false;
 let pendingReadyResolver = null;
 
@@ -50,7 +135,6 @@ function waitForReady() {
 
 function initStockfish() {
   console.log("initStockfish() called");
-  console.log("creating worker...");
 
   try {
     sf = new Worker("./engine/stockfish.js");
@@ -60,15 +144,7 @@ function initStockfish() {
     return;
   }
 
-  console.log("worker created OK");
   logDebug("Stockfish worker created.");
-
-  sf.onerror = err => {
-    console.error("Stockfish worker error:", err);
-    logDebug("ERROR: Stockfish worker error (see console).");
-  };
-
-  // (leave the rest of initStockfish exactly as it is below this point)
 
   sf.onerror = err => {
     console.error("Stockfish worker error:", err);
@@ -78,7 +154,7 @@ function initStockfish() {
   sf.onmessage = e => {
     const line = String(e.data);
 
-    // log everything except spammy "info" lines and raw bestmove lines (we log bestmove ourselves)
+    // Keep debug readable: ignore spammy info and raw bestmove lines
     if (!line.startsWith("info") && !line.startsWith("bestmove"))
       logDebug(line);
 
@@ -104,42 +180,34 @@ function initStockfish() {
     }
   };
 
-  // Start UCI handshake
   engineReady = false;
   sf.postMessage("uci");
   sf.postMessage("isready");
 
-  // Apply initial ELO
   applyEloToEngine(Number($elo.value));
 }
 
 function applyEloToEngine(elo) {
   if (!sf) return;
 
-  // Option changes may require a fresh readyok
   engineReady = false;
 
-  // Map ELO 400..2500 -> Skill 0..20 (common Stockfish range)
   const skill = Math.max(
     0,
     Math.min(20, Math.round(((elo - 400) / (2500 - 400)) * 20)),
   );
 
-  // Many older web builds support Skill Level and Slow Mover
+  // This build supports Slow Mover; Skill Level may or may not exist (safe to try)
   sf.postMessage(`setoption name Skill Level value ${skill}`);
 
-  // Slow Mover: higher = plays slower/weaker (varies by build, but works as a knob)
-  // We'll map low ELO -> slower/weaker, high ELO -> faster/stronger
   const slowMover = Math.max(
     10,
-    Math.min(1000, Math.round(300 - (elo - 400) * 0.12)), // ~300 down to ~48
+    Math.min(1000, Math.round(300 - (elo - 400) * 0.12)),
   );
   sf.postMessage(`setoption name Slow Mover value ${slowMover}`);
 
   sf.postMessage("isready");
-  logDebug(
-    `Applied slider: ${elo}  -> Skill ${skill}, Slow Mover ${slowMover}`,
-  );
+  logDebug(`Applied slider: ${elo} -> Skill ${skill}, Slow Mover ${slowMover}`);
 }
 
 function getEngineMove({ movetimeMs = 200 } = {}) {
@@ -165,7 +233,7 @@ function getEngineMove({ movetimeMs = 200 } = {}) {
   });
 }
 
-// ---------- Board UI ----------
+// ---------- Game flow ----------
 function updateStatus() {
   let status = "";
   const turn = game.turn() === "w" ? "White" : "Black";
@@ -180,6 +248,7 @@ function updateStatus() {
   }
 
   $status.textContent = status;
+  highlightCheck();
 }
 
 function isHumansTurn() {
@@ -191,7 +260,6 @@ async function maybeEnginePlays() {
   if (game.isGameOver()) return;
   if (isHumansTurn()) return;
 
-  // snapshot current position so we don't apply an engine move to a changed game
   const fenAtRequest = game.fen();
 
   const elo = Number($elo.value);
@@ -199,7 +267,7 @@ async function maybeEnginePlays() {
 
   const best = await getEngineMove({ movetimeMs });
 
-  // if something changed (undo/new game/human move), ignore this result
+  // If game changed while engine was thinking, ignore result
   if (game.fen() !== fenAtRequest) return;
 
   if (!best || best === "(none)" || best === "(busy)") return;
@@ -214,6 +282,8 @@ async function maybeEnginePlays() {
   if (move) {
     board.position(game.fen(), true);
     updateStatus();
+    renderMoveList();
+    highlightLastMove(from, to);
   }
 }
 
@@ -224,14 +294,14 @@ function onDragStart(source, piece) {
   const humanIsWhite = $playWhite.checked;
   if (humanIsWhite && piece.startsWith("b")) return false;
   if (!humanIsWhite && piece.startsWith("w")) return false;
+
   selectedSquare = source;
   highlightMovesFrom(source);
-
   return true;
 }
 
 function onDrop(source, target) {
-  // If you drop it back where you picked it up, treat it like "changed my mind"
+  // Drop back on original square = "never mind"
   if (source === target) {
     clearHighlights();
     selectedSquare = null;
@@ -248,14 +318,16 @@ function onDrop(source, target) {
 
   updateStatus();
   renderMoveList();
+  highlightLastMove(source, target);
+
+  clearHighlights();
+  selectedSquare = null;
 
   setTimeout(maybeEnginePlays, 0);
 }
 
 function onSnapEnd() {
   board.position(game.fen());
-  clearHighlights();
-  selectedSquare = null;
 }
 
 // ---------- Controls ----------
@@ -283,6 +355,9 @@ $undo.addEventListener("click", () => {
   board.position(game.fen(), true);
   updateStatus();
   renderMoveList();
+
+  // After undo, simplest is to clear last-move highlight (optional: recompute later)
+  clearLastMoveHighlight();
 });
 
 $flip.addEventListener("click", () => {
@@ -292,9 +367,15 @@ $flip.addEventListener("click", () => {
 function startNewGame() {
   game = new Chess();
   board.start(true);
+
+  clearDebug();
+  clearHighlights();
+  clearLastMoveHighlight();
+  clearCheckHighlight();
+  selectedSquare = null;
+
   updateStatus();
   renderMoveList();
-  clearDebug();
 
   // Reset engine for new game
   if (sf) {
@@ -310,56 +391,6 @@ function startNewGame() {
   setTimeout(maybeEnginePlays, 0);
 }
 
-// --- Move highlighting / click-to-select ---
-let selectedSquare = null;
-
-function clearHighlights() {
-  // chessboard.js uses jQuery squares with classes like "square-55d63"
-  // We remove our custom highlight classes from all squares.
-  $("#board .square-55d63").removeClass(
-    "square-highlight square-highlight-from",
-  );
-}
-let lastMoveSquares = null; // { from: "e2", to: "e4" }
-
-function clearLastMoveHighlight() {
-  $("#board .square-55d63").removeClass("square-last-from square-last-to");
-  lastMoveSquares = null;
-}
-
-function highlightLastMove(from, to) {
-  clearLastMoveHighlight();
-
-  $(`#board .square-55d63[data-square="${from}"]`).addClass("square-last-from");
-  $(`#board .square-55d63[data-square="${to}"]`).addClass("square-last-to");
-
-  lastMoveSquares = { from, to };
-}
-
-function highlightMovesFrom(square) {
-  clearHighlights();
-
-  // highlight the "from" square
-  $(`#board .square-55d63[data-square="${square}"]`).addClass(
-    "square-highlight-from",
-  );
-
-  // get legal moves from chess.js
-  const moves = game.moves({ square, verbose: true });
-  for (const m of moves) {
-    $(`#board .square-55d63[data-square="${m.to}"]`).addClass(
-      "square-highlight",
-    );
-  }
-}
-
-function isHumanPieceOn(square) {
-  const piece = game.get(square);
-  if (!piece) return false;
-  const humanColor = $playWhite.checked ? "w" : "b";
-  return piece.color === humanColor;
-}
-
 // ---------- Init ----------
 function initBoard() {
   board = Chessboard("board", {
@@ -371,14 +402,13 @@ function initBoard() {
     onSnapEnd,
   });
 
-  // ---- ADD THIS BLOCK RIGHT HERE ----
+  // Click-to-select (pick up / put down)
   $("#board").on("click", ".square-55d63", function () {
     if (game.isGameOver()) return;
     if (!isHumansTurn()) return;
 
     const square = $(this).attr("data-square");
 
-    // Nothing selected yet → select a piece
     if (!selectedSquare) {
       if (!isHumanPieceOn(square)) return;
       selectedSquare = square;
@@ -386,14 +416,13 @@ function initBoard() {
       return;
     }
 
-    // Clicking same square again → put it back down
+    // Click same square again = put it back down
     if (selectedSquare === square) {
       clearHighlights();
       selectedSquare = null;
       return;
     }
 
-    // Try move
     const move = game.move({
       from: selectedSquare,
       to: square,
@@ -405,32 +434,12 @@ function initBoard() {
     board.position(game.fen(), true);
     updateStatus();
     renderMoveList();
+    highlightLastMove(selectedSquare, square);
 
     clearHighlights();
     selectedSquare = null;
+
     setTimeout(maybeEnginePlays, 0);
-  });
-  // ---- END OF ADDED BLOCK ----
-}
-function renderMoveList() {
-  if (!$moves) return;
-
-  const hist = game.history();
-
-  let out = "";
-  for (let i = 0; i < hist.length; i += 2) {
-    const moveNum = i / 2 + 1;
-    const white = hist[i] || "";
-    const black = hist[i + 1] || "";
-    out += `${moveNum}. ${white.padEnd(8, " ")} ${black}\n`;
-  }
-
-  $moves.textContent = out.trimEnd();
-
-  // Smooth auto-scroll to newest move
-  $moves.scrollTo({
-    top: $moves.scrollHeight,
-    behavior: "smooth",
   });
 }
 
@@ -438,10 +447,9 @@ function renderMoveList() {
   initBoard();
   initStockfish();
   $eloValue.textContent = $elo.value;
+
   updateStatus();
   renderMoveList();
 
   setTimeout(maybeEnginePlays, 0);
-  clearHighlights();
-  selectedSquare = null;
 })();
