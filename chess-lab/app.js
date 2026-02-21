@@ -19,6 +19,7 @@ const $showMoveSquares = document.getElementById("showMoveSquares");
 const $showMoveDots = document.getElementById("showMoveDots");
 const $debugCard = document.getElementById("debugCard");
 const $debugToggle = document.getElementById("debugToggle");
+const $engineStatus = document.getElementById("engineStatus");
 
 // ---------- Debug helper ----------
 function logDebug(line) {
@@ -32,7 +33,22 @@ function logDebug(line) {
 function clearDebug() {
   if ($debug) $debug.textContent = "";
 }
+function setEngineThinking(isThinking) {
+  // indicator
+  if ($engineStatus) $engineStatus.hidden = !isThinking;
 
+  // disable controls while thinking
+  $newGame && ($newGame.disabled = isThinking);
+  $undo && ($undo.disabled = isThinking);
+  $flip && ($flip.disabled = isThinking);
+  $elo && ($elo.disabled = isThinking);
+  $playWhite && ($playWhite.disabled = isThinking);
+
+  // optional: prevent toggles from changing mid-calc
+  $clickToMove && ($clickToMove.disabled = isThinking);
+  $showMoveSquares && ($showMoveSquares.disabled = isThinking);
+  $showMoveDots && ($showMoveDots.disabled = isThinking);
+}
 // ---------- Move list ----------
 function renderMoveList() {
   if (!$moves) return;
@@ -303,7 +319,7 @@ function getEngineCandidates({
     }
 
     engineBusy = true;
-
+    setEngineThinking(true);
     // Prepare analysis collection
     currentMultiPV = multiPV;
     analysisTargetDepth = targetDepth;
