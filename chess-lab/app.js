@@ -134,7 +134,10 @@ function highlightCheck() {
 let sf = null;
 let engineBusy = false;
 let pendingBestMoveResolver = null;
-
+// ---------- MultiPV (humanized engine) ----------
+let pendingAnalysisResolver = null;
+let analysisBuffer = new Map(); // multipv -> { moveUci, scoreCp, scoreMate, depth }
+let analysisBestDepthSeen = 0;
 let engineReady = false;
 let pendingReadyResolver = null;
 
@@ -144,7 +147,35 @@ function waitForReady() {
     pendingReadyResolver = resolve;
   });
 }
+let currentMultiPV = 5;
+let analysisTargetDepth = 10;
 
+// Parses lines like:
+// info depth 15 multipv 2 score cp 12 pv e2e4 e7e5 ...
+function parseInfoLine(line) {
+  // quick exits
+  if (!line.includes(" pv ")) return null;
+
+  const depthMatch = line.match(/\bdepth\s+(\d+)\b/);
+  const mpvMatch = line.match(/\bmultipv\s+(\d+)\b/);
+  const pvMatch = line.match(/\bpv\s+([a-h][1-8][a-h][1-8][qrbn]?)\b/);
+  const cpMatch = line.match(/\bscore\s+cp\s+(-?\d+)\b/);
+  const mateMatch = line.match(/\bscore\s+mate\s+(-?\d+)\b/);
+
+  if (!depthMatch || !mpvMatch || !pvMatch) return null;
+
+  const depth = Number(depthMatch[1]);
+  const multipv = Number(mpvMatch[1]);
+  const moveUci = pvMatch[1];
+
+  return {
+    depth,
+    multipv,
+    moveUci,
+    scoreCp: cpMatch ? Number(cpMatch[1]) : null,
+    scoreMate: mateMatch ? Number(mateMatch[1]) : null,
+  };
+}
 function initStockfish() {
   console.log("initStockfish() called");
 
@@ -166,9 +197,34 @@ function initStockfish() {
   sf.onmessage = e => {
     const line = String(e.data);
 
-    // Keep debug readable: ignore spammy info and raw bestmove lines
-    if (!line.startsWith("info") && !line.startsWith("bestmove"))
+    // Keep debug readable: ignore spammy "info" unless we want it
+    if (!line.startsWith("bestmove") && !line.startsWith("info"))
       logDebug(line);
+
+    // Parse MultiPV info lines when we're in analysis mode
+    if (line.startsWith("info")) {
+      const parsed = parseInfoLine(line);
+      if (parsed && pendingAnalysisResolver) {
+        // Track best depth seen to know when we have "enough" info
+        analysisBestDepthSeen = Math.max(analysisBestDepthSeen, parsed.depth);
+
+        analysisBuffer.set(parsed.multipv, parsed);
+
+        // When we have all N multipv lines at a decent depth, resolve early
+        const wantN = currentMultiPV;
+        if (
+          analysisBestDepthSeen >= analysisTargetDepth &&
+          analysisBuffer.size >= wantN
+        ) {
+          const resolve = pendingAnalysisResolver;
+          pendingAnalysisResolver = null;
+          const candidates = [...analysisBuffer.values()].sort(
+            (a, b) => a.multipv - b.multipv,
+          );
+          resolve(candidates);
+        }
+      }
+    }
 
     if (line === "readyok") {
       engineReady = true;
@@ -209,19 +265,95 @@ function applyEloToEngine(elo) {
     Math.min(20, Math.round(((elo - 400) / (2500 - 400)) * 20)),
   );
 
-  // This build supports Slow Mover; Skill Level may or may not exist (safe to try)
-  sf.postMessage(`setoption name Skill Level value ${skill}`);
-
   const slowMover = Math.max(
     10,
     Math.min(1000, Math.round(300 - (elo - 400) * 0.12)),
   );
-  sf.postMessage(`setoption name Slow Mover value ${slowMover}`);
 
+  // Set engine options
+  sf.postMessage(`setoption name Skill Level value ${skill}`);
+  sf.postMessage(`setoption name Slow Mover value ${slowMover}`);
+  sf.postMessage(`setoption name MultiPV value ${currentMultiPV}`);
+
+  // Ask engine to confirm readiness AFTER options are set
   sf.postMessage("isready");
-  logDebug(`Applied slider: ${elo} -> Skill ${skill}, Slow Mover ${slowMover}`);
+
+  logDebug(
+    `Applied slider: ${elo} -> Skill ${skill}, Slow Mover ${slowMover}, MultiPV ${currentMultiPV}`,
+  );
 }
 
+function getEngineCandidates({
+  movetimeMs = 200,
+  multiPV = 5,
+  targetDepth = 10,
+} = {}) {
+  return new Promise(async resolve => {
+    if (!sf) {
+      logDebug("ERROR: Stockfish not initialized.");
+      resolve([]);
+      return;
+    }
+
+    await waitForReady();
+
+    if (engineBusy) {
+      resolve([]);
+      return;
+    }
+
+    engineBusy = true;
+
+    // Prepare analysis collection
+    currentMultiPV = multiPV;
+    analysisTargetDepth = targetDepth;
+    analysisBuffer = new Map();
+    analysisBestDepthSeen = 0;
+
+    pendingAnalysisResolver = candidates => {
+      engineBusy = false;
+      resolve(candidates);
+    };
+
+    // Safety: if we don't get enough info lines, fallback when bestmove arrives
+    pendingBestMoveResolver = best => {
+      // If analysis already resolved, ignore
+      if (!pendingAnalysisResolver) return;
+
+      const resolveAnalysis = pendingAnalysisResolver;
+      pendingAnalysisResolver = null;
+
+      engineBusy = false;
+
+      // Use whatever we collected; if nothing, at least return bestmove
+      const partial = [...analysisBuffer.values()].sort(
+        (a, b) => a.multipv - b.multipv,
+      );
+      if (
+        partial.length === 0 &&
+        best &&
+        best !== "(none)" &&
+        best !== "(busy)"
+      ) {
+        resolveAnalysis([
+          {
+            depth: 0,
+            multipv: 1,
+            moveUci: best,
+            scoreCp: null,
+            scoreMate: null,
+          },
+        ]);
+      } else {
+        resolveAnalysis(partial);
+      }
+    };
+
+    sf.postMessage(`setoption name MultiPV value ${multiPV}`);
+    sf.postMessage(`position fen ${game.fen()}`);
+    sf.postMessage(`go movetime ${movetimeMs}`);
+  });
+}
 function getEngineMove({ movetimeMs = 200 } = {}) {
   return new Promise(async resolve => {
     if (!sf) {
@@ -267,7 +399,62 @@ function isHumansTurn() {
   const humanColor = $playWhite.checked ? "w" : "b";
   return game.turn() === humanColor;
 }
+function chooseHumanMove(candidates, elo) {
+  if (!candidates || candidates.length === 0) return null;
 
+  // --- Convert mate scores into huge cp so we can compare ---
+  function effectiveCp(c) {
+    if (c.scoreMate !== null) {
+      // mate in N: treat as extremely good/bad
+      const sign = Math.sign(c.scoreMate);
+      return sign * 100000;
+    }
+    return c.scoreCp ?? 0;
+  }
+
+  // Best = multipv 1 (usually)
+  const sorted = [...candidates].sort((a, b) => a.multipv - b.multipv);
+  const best = sorted[0];
+  const bestCp = effectiveCp(best);
+
+  // --- ELO → blunder behavior ---
+  // Tune these numbers later; they're sane starters.
+  const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400))); // 0..1
+  const blunderChance = (1 - t) * 0.28; // ~28% at 400, ~0% at 2500
+  const maxDrop = 500 - t * 450; // ~500cp at low elo, ~50cp at high elo
+
+  // If we're winning big, reduce blunders a bit (humans still blunder, but less often when it’s “easy”)
+  const situational = Math.max(0.4, Math.min(1.0, 1 - (bestCp / 800) * 0.25));
+  const finalBlunderChance = blunderChance * situational;
+
+  // Decide if we intentionally deviate
+  const doBlunder = Math.random() < finalBlunderChance;
+
+  if (!doBlunder) return best.moveUci;
+
+  // Allowed candidates within eval drop tolerance
+  const allowed = sorted.filter(c => bestCp - effectiveCp(c) <= maxDrop);
+
+  // If nothing fits (rare), take best
+  if (allowed.length === 0) return best.moveUci;
+
+  // Weighted pick: prefer better moves but allow mistakes
+  // Weight decreases as eval gets worse.
+  const weights = allowed.map(c => {
+    const drop = Math.max(0, bestCp - effectiveCp(c));
+    return 1 / (1 + drop / 50); // drop 0 -> 1.0 ; drop 200 -> ~0.2
+  });
+
+  // Weighted random selection
+  const sum = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * sum;
+  for (let i = 0; i < allowed.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return allowed[i].moveUci;
+  }
+
+  return allowed[0].moveUci;
+}
 async function maybeEnginePlays() {
   if (game.isGameOver()) return;
   if (isHumansTurn()) return;
@@ -277,18 +464,23 @@ async function maybeEnginePlays() {
   const elo = Number($elo.value);
   const movetimeMs = Math.round(80 + (elo - 400) * 0.12);
 
-  const best = await getEngineMove({ movetimeMs });
+  const candidates = await getEngineCandidates({
+    movetimeMs,
+    multiPV: 5,
+    targetDepth: 10,
+  });
 
   // If game changed while engine was thinking, ignore result
   if (game.fen() !== fenAtRequest) return;
 
-  if (!best || best === "(none)" || best === "(busy)") return;
+  const chosen = chooseHumanMove(candidates, elo);
+  if (!chosen) return;
 
-  logDebug(`bestmove: ${best}`);
+  logDebug(`engine move: ${chosen} (best ${candidates[0]?.moveUci ?? "?"})`);
 
-  const from = best.slice(0, 2);
-  const to = best.slice(2, 4);
-  const promo = best.length >= 5 ? best[4] : undefined;
+  const from = chosen.slice(0, 2);
+  const to = chosen.slice(2, 4);
+  const promo = chosen.length >= 5 ? chosen[4] : undefined;
 
   const move = game.move({ from, to, promotion: promo || "q" });
   if (move) {
