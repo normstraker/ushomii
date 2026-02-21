@@ -14,6 +14,11 @@ const $newGame = document.getElementById("newGame");
 const $undo = document.getElementById("undo");
 const $flip = document.getElementById("flip");
 const $playWhite = document.getElementById("playWhite");
+const $clickToMove = document.getElementById("clickToMove");
+const $showMoveSquares = document.getElementById("showMoveSquares");
+const $showMoveDots = document.getElementById("showMoveDots");
+const $debugCard = document.getElementById("debugCard");
+const $debugToggle = document.getElementById("debugToggle");
 
 // ---------- Debug helper ----------
 function logDebug(line) {
@@ -53,22 +58,29 @@ let selectedSquare = null;
 
 function clearHighlights() {
   $("#board .square-55d63").removeClass(
-    "square-highlight square-highlight-from",
+    "square-highlight square-highlight-from square-move-dot",
   );
 }
 
 function highlightMovesFrom(square) {
   clearHighlights();
 
-  $(`#board .square-55d63[data-square="${square}"]`).addClass(
-    "square-highlight-from",
-  );
+  const showSquares = $showMoveSquares?.checked ?? true;
+  const showDots = $showMoveDots?.checked ?? true;
+
+  if (!showSquares && !showDots) return;
+
+  if (showSquares) {
+    $(`#board .square-55d63[data-square="${square}"]`).addClass(
+      "square-highlight-from",
+    );
+  }
 
   const moves = game.moves({ square, verbose: true });
   for (const m of moves) {
-    $(`#board .square-55d63[data-square="${m.to}"]`).addClass(
-      "square-highlight",
-    );
+    const $sq = $(`#board .square-55d63[data-square="${m.to}"]`);
+    if (showSquares) $sq.addClass("square-highlight");
+    if (showDots) $sq.addClass("square-move-dot");
   }
 }
 
@@ -288,6 +300,7 @@ async function maybeEnginePlays() {
 }
 
 function onDragStart(source, piece) {
+  if ($clickToMove?.checked) return false;
   if (game.isGameOver()) return false;
   if (!isHumansTurn()) return false;
 
@@ -346,6 +359,16 @@ $playWhite.addEventListener("change", () => {
 
 $newGame.addEventListener("click", () => startNewGame());
 
+$showMoveSquares?.addEventListener("change", () => {
+  clearHighlights();
+  if (selectedSquare) highlightMovesFrom(selectedSquare);
+});
+
+$showMoveDots?.addEventListener("change", () => {
+  clearHighlights();
+  if (selectedSquare) highlightMovesFrom(selectedSquare);
+});
+
 $undo.addEventListener("click", () => {
   if (game.history().length === 0) return;
 
@@ -402,13 +425,28 @@ function initBoard() {
     onSnapEnd,
   });
 
-  // Click-to-select (pick up / put down)
-  $("#board").on("click", ".square-55d63", function () {
+  const boardEl = document.getElementById("board");
+
+  // Remove any previous handlers (in case of hot reloads / re-init)
+  boardEl.onclick = null;
+
+  // Click-to-move on the board (sticky pick up / put down)
+  boardEl.addEventListener("click", e => {
+    if (!$clickToMove?.checked) return;
     if (game.isGameOver()) return;
     if (!isHumansTurn()) return;
 
-    const square = $(this).attr("data-square");
+    // Prevent the document click handler from firing on board clicks
+    e.stopPropagation();
 
+    // Find the clicked square no matter whether you clicked the piece image or the square
+    const sqEl = e.target.closest(".square-55d63");
+    if (!sqEl) return;
+
+    const square = sqEl.getAttribute("data-square");
+    if (!square) return;
+
+    // Nothing held: must click your piece to pick up
     if (!selectedSquare) {
       if (!isHumanPieceOn(square)) return;
       selectedSquare = square;
@@ -416,21 +454,33 @@ function initBoard() {
       return;
     }
 
-    // Click same square again = put it back down
-    if (selectedSquare === square) {
+    // Something is held:
+
+    // Click same square again = cancel ("put it back")
+    if (square === selectedSquare) {
       clearHighlights();
       selectedSquare = null;
       return;
     }
 
+    // Clicking another of your pieces switches selection
+    if (isHumanPieceOn(square)) {
+      selectedSquare = square;
+      highlightMovesFrom(square);
+      return;
+    }
+
+    // Attempt move
     const move = game.move({
       from: selectedSquare,
       to: square,
       promotion: "q",
     });
 
+    // Illegal: keep holding + keep highlights
     if (move === null) return;
 
+    // Legal: commit
     board.position(game.fen(), true);
     updateStatus();
     renderMoveList();
@@ -441,7 +491,45 @@ function initBoard() {
 
     setTimeout(maybeEnginePlays, 0);
   });
+
+  // Click off-board cancels (REGISTER ONCE)
+  document.removeEventListener("click", window.__chesslabCancelClickToMove);
+  window.__chesslabCancelClickToMove = function () {
+    if (!$clickToMove?.checked) return;
+    if (!selectedSquare) return;
+    clearHighlights();
+    selectedSquare = null;
+  };
+  document.addEventListener("click", window.__chesslabCancelClickToMove);
 }
+
+function setDebugOpen(isOpen) {
+  if (!$debugCard) return;
+
+  $debugCard.classList.toggle("is-open", isOpen);
+  $debugCard.classList.toggle("is-collapsed", !isOpen);
+
+  try {
+    localStorage.setItem("chesslab_debug_open", isOpen ? "1" : "0");
+  } catch (_) {}
+}
+
+(function initDebugCollapse() {
+  if (!$debugToggle || !$debugCard) return;
+
+  let isOpen = false;
+  try {
+    isOpen = localStorage.getItem("chesslab_debug_open") === "1";
+  } catch (_) {}
+
+  // Default collapsed
+  setDebugOpen(isOpen);
+
+  $debugToggle.addEventListener("click", () => {
+    const nowOpen = !$debugCard.classList.contains("is-open");
+    setDebugOpen(nowOpen);
+  });
+})();
 
 (function main() {
   initBoard();

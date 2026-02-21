@@ -53,7 +53,26 @@
               step="50"
               value="1200"
             />
+            <div class="row">
+              <label class="check">
+                <input id="clickToMove" type="checkbox" checked />
+                <span>Click-to-move (pick up / put down)</span>
+              </label>
+            </div>
 
+            <div class="row">
+              <label class="check">
+                <input id="showMoveSquares" type="checkbox" checked />
+                <span>Show legal move squares</span>
+              </label>
+            </div>
+
+            <div class="row">
+              <label class="check">
+                <input id="showMoveDots" type="checkbox" checked />
+                <span>Show legal move dots</span>
+              </label>
+            </div>
             <div class="hint">
               Change anytime. New strength applies on the engine’s next move.
             </div>
@@ -71,14 +90,25 @@
               <button id="flip">Flip</button>
             </div>
           </div>
-          <div class="card">
+          <div class="card" id="movesCard">
             <div class="card-title">Moves</div>
-            <pre id="moves" class="moves"></pre>
+            <div class="moves-body">
+              <pre id="moves" class="moves"></pre>
+            </div>
           </div>
 
-          <div class="card">
-            <div class="card-title">Debug</div>
-            <pre id="debug" class="debug"></pre>
+          <div class="card" id="debugCard">
+            <button
+              class="card-title collapsible"
+              id="debugToggle"
+              type="button"
+            >
+              Debug <span class="chev" id="debugChev">▸</span>
+            </button>
+
+            <div class="collapsible-body" id="debugBody">
+              <pre id="debug" class="debug"></pre>
+            </div>
           </div>
         </aside>
       </main>

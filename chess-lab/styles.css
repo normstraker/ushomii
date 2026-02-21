@@ -10,6 +10,10 @@
 * {
   box-sizing: border-box;
 }
+html,
+body {
+  height: 100%;
+}
 
 body {
   margin: 0;
@@ -22,9 +26,15 @@ body {
     sans-serif;
   background: var(--bg);
   color: var(--text);
+  overflow: hidden; /* prevent the whole page from scrolling */
 }
 
 .page {
+  height: 100vh;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+
   max-width: 1100px;
   margin: 0 auto;
   padding: 18px;
@@ -51,8 +61,10 @@ body {
   display: grid;
   grid-template-columns: 1fr 320px;
   gap: 16px;
-}
 
+  flex: 1;
+  min-height: 0; /* CRITICAL for grids inside */
+}
 .board-wrap {
   display: grid;
   gap: 12px;
@@ -60,11 +72,33 @@ body {
 
 .board {
   width: min(82vw, 720px);
+  aspect-ratio: 1 / 1;
+
+  /* Prevent board from being taller than viewport */
+  max-height: calc(100dvh - 180px);
+
   border-radius: var(--radius);
   overflow: hidden;
   border: 1px solid var(--border);
 }
 
+#board {
+  width: 100%;
+  height: 100%;
+}
+
+.square-move-dot::after {
+  content: "";
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+}
 .status {
   color: var(--muted);
   padding: 10px 12px;
@@ -77,6 +111,10 @@ body {
 .panel {
   display: grid;
   gap: 12px;
+  grid-template-rows: auto 1fr auto;
+
+  height: 100%;
+  min-height: 0; /* CRITICAL */
 }
 
 .card {
@@ -89,6 +127,73 @@ body {
 .card-title {
   font-weight: 700;
   margin-bottom: 10px;
+}
+
+/* Collapsible card header */
+.card-title.collapsible {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0;
+
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.card-title.collapsible:focus {
+  outline: 2px solid rgba(0, 0, 0, 0.2);
+  outline-offset: 4px;
+}
+
+/* Collapsible body */
+.collapsible-body {
+  margin-top: 10px;
+  overflow: hidden;
+  max-height: 600px; /* enough for big debug logs */
+  transition:
+    max-height 220ms ease,
+    opacity 220ms ease;
+  opacity: 1;
+}
+
+/* collapsed state */
+#debugCard.is-collapsed .collapsible-body {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+}
+
+/* chevron */
+.chev {
+  display: inline-block;
+  transition: transform 180ms ease;
+  transform: rotate(0deg);
+}
+
+#debugCard.is-open .chev {
+  transform: rotate(90deg);
+}
+#debugBody {
+  max-height: 220px; /* or whatever feels right */
+  overflow: auto;
+}
+#movesCard {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.moves-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  margin-top: 10px;
 }
 
 .label-row {
@@ -160,8 +265,6 @@ button:hover {
   font-size: 14px;
   line-height: 1.4;
   margin: 0;
-  max-height: 260px;
-  overflow: auto;
 }
 
 /* Highlight squares */
