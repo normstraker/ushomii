@@ -19,7 +19,22 @@ const $showMoveSquares = document.getElementById("showMoveSquares");
 const $showMoveDots = document.getElementById("showMoveDots");
 const $debugCard = document.getElementById("debugCard");
 const $debugToggle = document.getElementById("debugToggle");
-const $engineStatus = document.getElementById("engineStatus");
+
+// ---------- Inline engine indicator injected into #status ----------
+let $engineInline = null;
+let thinkingDelayTimer = null;
+
+function ensureEngineInline() {
+  if ($engineInline || !$status) return;
+
+  $engineInline = document.createElement("span");
+  $engineInline.className = "engine-inline";
+  $engineInline.hidden = true;
+  $engineInline.setAttribute("aria-live", "polite");
+  $engineInline.innerHTML = `<span class="spinner" aria-hidden="true"></span>Thinking…`;
+
+  $status.appendChild($engineInline);
+}
 
 // ---------- Debug helper ----------
 function logDebug(line) {
@@ -33,22 +48,55 @@ function logDebug(line) {
 function clearDebug() {
   if ($debug) $debug.textContent = "";
 }
-function setEngineThinking(isThinking) {
-  // indicator
-  if ($engineStatus) $engineStatus.hidden = !isThinking;
 
-  // disable controls while thinking
-  $newGame && ($newGame.disabled = isThinking);
-  $undo && ($undo.disabled = isThinking);
-  $flip && ($flip.disabled = isThinking);
-  $elo && ($elo.disabled = isThinking);
-  $playWhite && ($playWhite.disabled = isThinking);
-
-  // optional: prevent toggles from changing mid-calc
-  $clickToMove && ($clickToMove.disabled = isThinking);
-  $showMoveSquares && ($showMoveSquares.disabled = isThinking);
-  $showMoveDots && ($showMoveDots.disabled = isThinking);
+// ---------- ELO UI sync + persistence ----------
+function syncEloUI() {
+  if (!$elo || !$eloValue) return;
+  $eloValue.textContent = $elo.value;
 }
+function loadSavedElo() {
+  try {
+    const saved = localStorage.getItem("chesslab_elo");
+    if (saved) $elo.value = saved;
+  } catch (_) {}
+  syncEloUI();
+}
+function saveElo() {
+  try {
+    localStorage.setItem("chesslab_elo", String($elo.value));
+  } catch (_) {}
+}
+
+// ---------- Engine thinking / UI lock ----------
+function setEngineThinking(isThinking) {
+  ensureEngineInline();
+
+  // Show only if thinking lasts > 150ms (prevents flicker on fast moves)
+  if (isThinking) {
+    if (thinkingDelayTimer) clearTimeout(thinkingDelayTimer);
+    thinkingDelayTimer = setTimeout(() => {
+      if ($engineInline) $engineInline.hidden = false;
+    }, 150);
+  } else {
+    if (thinkingDelayTimer) {
+      clearTimeout(thinkingDelayTimer);
+      thinkingDelayTimer = null;
+    }
+    if ($engineInline) $engineInline.hidden = true;
+  }
+
+  // Disable controls while thinking
+  if ($newGame) $newGame.disabled = isThinking;
+  if ($undo) $undo.disabled = isThinking;
+  if ($flip) $flip.disabled = isThinking;
+  if ($elo) $elo.disabled = isThinking;
+  if ($playWhite) $playWhite.disabled = isThinking;
+
+  if ($clickToMove) $clickToMove.disabled = isThinking;
+  if ($showMoveSquares) $showMoveSquares.disabled = isThinking;
+  if ($showMoveDots) $showMoveDots.disabled = isThinking;
+}
+
 // ---------- Move list ----------
 function renderMoveList() {
   if (!$moves) return;
@@ -64,8 +112,6 @@ function renderMoveList() {
   }
 
   $moves.textContent = out.trimEnd();
-
-  // Auto-scroll to newest move (smooth)
   $moves.scrollTo({ top: $moves.scrollHeight, behavior: "smooth" });
 }
 
@@ -83,7 +129,6 @@ function highlightMovesFrom(square) {
 
   const showSquares = $showMoveSquares?.checked ?? true;
   const showDots = $showMoveDots?.checked ?? true;
-
   if (!showSquares && !showDots) return;
 
   if (showSquares) {
@@ -111,7 +156,6 @@ function isHumanPieceOn(square) {
 function clearLastMoveHighlight() {
   $("#board .square-55d63").removeClass("square-last-from square-last-to");
 }
-
 function highlightLastMove(from, to) {
   clearLastMoveHighlight();
   $(`#board .square-55d63[data-square="${from}"]`).addClass("square-last-from");
@@ -122,10 +166,8 @@ function highlightLastMove(from, to) {
 function clearCheckHighlight() {
   $("#board .square-55d63").removeClass("square-check square-checkmate");
 }
-
 function highlightCheck() {
   clearCheckHighlight();
-
   if (!game.isCheck()) return;
 
   const inMate = game.isCheckmate();
@@ -149,13 +191,19 @@ function highlightCheck() {
 // ---------- Stockfish worker ----------
 let sf = null;
 let engineBusy = false;
+
 let pendingBestMoveResolver = null;
-// ---------- MultiPV (humanized engine) ----------
+
+// MultiPV analysis
 let pendingAnalysisResolver = null;
 let analysisBuffer = new Map(); // multipv -> { moveUci, scoreCp, scoreMate, depth }
 let analysisBestDepthSeen = 0;
+
 let engineReady = false;
 let pendingReadyResolver = null;
+
+let currentMultiPV = 5;
+let analysisTargetDepth = 10;
 
 function waitForReady() {
   if (engineReady) return Promise.resolve();
@@ -163,13 +211,10 @@ function waitForReady() {
     pendingReadyResolver = resolve;
   });
 }
-let currentMultiPV = 5;
-let analysisTargetDepth = 10;
 
 // Parses lines like:
 // info depth 15 multipv 2 score cp 12 pv e2e4 e7e5 ...
 function parseInfoLine(line) {
-  // quick exits
   if (!line.includes(" pv ")) return null;
 
   const depthMatch = line.match(/\bdepth\s+(\d+)\b/);
@@ -180,18 +225,15 @@ function parseInfoLine(line) {
 
   if (!depthMatch || !mpvMatch || !pvMatch) return null;
 
-  const depth = Number(depthMatch[1]);
-  const multipv = Number(mpvMatch[1]);
-  const moveUci = pvMatch[1];
-
   return {
-    depth,
-    multipv,
-    moveUci,
+    depth: Number(depthMatch[1]),
+    multipv: Number(mpvMatch[1]),
+    moveUci: pvMatch[1],
     scoreCp: cpMatch ? Number(cpMatch[1]) : null,
     scoreMate: mateMatch ? Number(mateMatch[1]) : null,
   };
 }
+
 function initStockfish() {
   console.log("initStockfish() called");
 
@@ -208,25 +250,24 @@ function initStockfish() {
   sf.onerror = err => {
     console.error("Stockfish worker error:", err);
     logDebug("ERROR: Stockfish worker error (see console).");
+    engineBusy = false;
+    setEngineThinking(false);
   };
 
   sf.onmessage = e => {
     const line = String(e.data);
 
-    // Keep debug readable: ignore spammy "info" unless we want it
+    // Keep debug readable
     if (!line.startsWith("bestmove") && !line.startsWith("info"))
       logDebug(line);
 
-    // Parse MultiPV info lines when we're in analysis mode
+    // MultiPV info lines
     if (line.startsWith("info")) {
       const parsed = parseInfoLine(line);
       if (parsed && pendingAnalysisResolver) {
-        // Track best depth seen to know when we have "enough" info
         analysisBestDepthSeen = Math.max(analysisBestDepthSeen, parsed.depth);
-
         analysisBuffer.set(parsed.multipv, parsed);
 
-        // When we have all N multipv lines at a decent depth, resolve early
         const wantN = currentMultiPV;
         if (
           analysisBestDepthSeen >= analysisTargetDepth &&
@@ -234,12 +275,18 @@ function initStockfish() {
         ) {
           const resolve = pendingAnalysisResolver;
           pendingAnalysisResolver = null;
+          pendingBestMoveResolver = null;
+
           const candidates = [...analysisBuffer.values()].sort(
             (a, b) => a.multipv - b.multipv,
           );
+
+          engineBusy = false;
+          setEngineThinking(false);
           resolve(candidates);
         }
       }
+      return;
     }
 
     if (line === "readyok") {
@@ -254,8 +301,38 @@ function initStockfish() {
     if (line.startsWith("bestmove")) {
       const parts = line.split(/\s+/);
       const best = parts[1];
-      engineBusy = false;
 
+      // Engine is done
+      engineBusy = false;
+      setEngineThinking(false);
+
+      // If we were collecting MultiPV but didn't hit threshold, resolve partial
+      if (pendingAnalysisResolver) {
+        const resolveAnalysis = pendingAnalysisResolver;
+        pendingAnalysisResolver = null;
+        pendingBestMoveResolver = null;
+
+        const partial = [...analysisBuffer.values()].sort(
+          (a, b) => a.multipv - b.multipv,
+        );
+
+        if (partial.length === 0 && best) {
+          resolveAnalysis([
+            {
+              depth: 0,
+              multipv: 1,
+              moveUci: best,
+              scoreCp: null,
+              scoreMate: null,
+            },
+          ]);
+        } else {
+          resolveAnalysis(partial);
+        }
+        return;
+      }
+
+      // Classic bestmove path
       if (pendingBestMoveResolver) {
         const resolve = pendingBestMoveResolver;
         pendingBestMoveResolver = null;
@@ -265,9 +342,12 @@ function initStockfish() {
   };
 
   engineReady = false;
+
+  // Start UCI
   sf.postMessage("uci");
   sf.postMessage("isready");
 
+  // Apply slider after boot
   applyEloToEngine(Number($elo.value));
 }
 
@@ -286,12 +366,9 @@ function applyEloToEngine(elo) {
     Math.min(1000, Math.round(300 - (elo - 400) * 0.12)),
   );
 
-  // Set engine options
   sf.postMessage(`setoption name Skill Level value ${skill}`);
   sf.postMessage(`setoption name Slow Mover value ${slowMover}`);
   sf.postMessage(`setoption name MultiPV value ${currentMultiPV}`);
-
-  // Ask engine to confirm readiness AFTER options are set
   sf.postMessage("isready");
 
   logDebug(
@@ -299,6 +376,18 @@ function applyEloToEngine(elo) {
   );
 }
 
+// ELO -> search params (makes slider feel real)
+function engineParamsForElo(elo) {
+  const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
+
+  const movetimeMs = Math.round(80 + (elo - 400) * 0.12);
+  const targetDepth = Math.round(6 + t * 8); // ~6..14
+  const multiPV = t < 0.35 ? 3 : 5;
+
+  return { movetimeMs, targetDepth, multiPV };
+}
+
+// Get top N candidate moves (MultiPV). Uses bestmove as fallback.
 function getEngineCandidates({
   movetimeMs = 200,
   multiPV = 5,
@@ -320,31 +409,28 @@ function getEngineCandidates({
 
     engineBusy = true;
     setEngineThinking(true);
-    // Prepare analysis collection
+
     currentMultiPV = multiPV;
     analysisTargetDepth = targetDepth;
     analysisBuffer = new Map();
     analysisBestDepthSeen = 0;
 
-    pendingAnalysisResolver = candidates => {
-      engineBusy = false;
-      resolve(candidates);
-    };
+    pendingAnalysisResolver = candidates => resolve(candidates);
 
-    // Safety: if we don't get enough info lines, fallback when bestmove arrives
+    // Fallback if we never get enough info lines
     pendingBestMoveResolver = best => {
-      // If analysis already resolved, ignore
       if (!pendingAnalysisResolver) return;
 
       const resolveAnalysis = pendingAnalysisResolver;
       pendingAnalysisResolver = null;
 
       engineBusy = false;
+      setEngineThinking(false);
 
-      // Use whatever we collected; if nothing, at least return bestmove
       const partial = [...analysisBuffer.values()].sort(
         (a, b) => a.multipv - b.multipv,
       );
+
       if (
         partial.length === 0 &&
         best &&
@@ -370,28 +456,6 @@ function getEngineCandidates({
     sf.postMessage(`go movetime ${movetimeMs}`);
   });
 }
-function getEngineMove({ movetimeMs = 200 } = {}) {
-  return new Promise(async resolve => {
-    if (!sf) {
-      logDebug("ERROR: Stockfish not initialized.");
-      resolve("(none)");
-      return;
-    }
-
-    await waitForReady();
-
-    if (engineBusy) {
-      resolve("(busy)");
-      return;
-    }
-
-    engineBusy = true;
-    pendingBestMoveResolver = resolve;
-
-    sf.postMessage(`position fen ${game.fen()}`);
-    sf.postMessage(`go movetime ${movetimeMs}`);
-  });
-}
 
 // ---------- Game flow ----------
 function updateStatus() {
@@ -408,6 +472,7 @@ function updateStatus() {
   }
 
   $status.textContent = status;
+  ensureEngineInline(); // re-attach after textContent wipe
   highlightCheck();
 }
 
@@ -415,53 +480,39 @@ function isHumansTurn() {
   const humanColor = $playWhite.checked ? "w" : "b";
   return game.turn() === humanColor;
 }
+
 function chooseHumanMove(candidates, elo) {
   if (!candidates || candidates.length === 0) return null;
 
-  // --- Convert mate scores into huge cp so we can compare ---
   function effectiveCp(c) {
-    if (c.scoreMate !== null) {
-      // mate in N: treat as extremely good/bad
-      const sign = Math.sign(c.scoreMate);
-      return sign * 100000;
-    }
+    if (c.scoreMate !== null) return Math.sign(c.scoreMate) * 100000;
     return c.scoreCp ?? 0;
   }
 
-  // Best = multipv 1 (usually)
   const sorted = [...candidates].sort((a, b) => a.multipv - b.multipv);
   const best = sorted[0];
   const bestCp = effectiveCp(best);
 
-  // --- ELO → blunder behavior ---
-  // Tune these numbers later; they're sane starters.
-  const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400))); // 0..1
-  const blunderChance = (1 - t) * 0.28; // ~28% at 400, ~0% at 2500
-  const maxDrop = 500 - t * 450; // ~500cp at low elo, ~50cp at high elo
+  // ELO -> blunder behavior
+  const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
+  const blunderChance = (1 - t) * 0.28;
+  const maxDrop = 500 - t * 450;
 
-  // If we're winning big, reduce blunders a bit (humans still blunder, but less often when it’s “easy”)
+  // Slightly fewer blunders when position is "easy"
   const situational = Math.max(0.4, Math.min(1.0, 1 - (bestCp / 800) * 0.25));
   const finalBlunderChance = blunderChance * situational;
 
-  // Decide if we intentionally deviate
   const doBlunder = Math.random() < finalBlunderChance;
-
   if (!doBlunder) return best.moveUci;
 
-  // Allowed candidates within eval drop tolerance
   const allowed = sorted.filter(c => bestCp - effectiveCp(c) <= maxDrop);
-
-  // If nothing fits (rare), take best
   if (allowed.length === 0) return best.moveUci;
 
-  // Weighted pick: prefer better moves but allow mistakes
-  // Weight decreases as eval gets worse.
   const weights = allowed.map(c => {
     const drop = Math.max(0, bestCp - effectiveCp(c));
-    return 1 / (1 + drop / 50); // drop 0 -> 1.0 ; drop 200 -> ~0.2
+    return 1 / (1 + drop / 50);
   });
 
-  // Weighted random selection
   const sum = weights.reduce((a, b) => a + b, 0);
   let r = Math.random() * sum;
   for (let i = 0; i < allowed.length; i++) {
@@ -471,6 +522,7 @@ function chooseHumanMove(candidates, elo) {
 
   return allowed[0].moveUci;
 }
+
 async function maybeEnginePlays() {
   if (game.isGameOver()) return;
   if (isHumansTurn()) return;
@@ -478,12 +530,16 @@ async function maybeEnginePlays() {
   const fenAtRequest = game.fen();
 
   const elo = Number($elo.value);
-  const movetimeMs = Math.round(80 + (elo - 400) * 0.12);
+  const { movetimeMs, targetDepth, multiPV } = engineParamsForElo(elo);
+
+  logDebug(
+    `ELO ${elo}: movetime=${movetimeMs}ms depth≈${targetDepth} multipv=${multiPV}`,
+  );
 
   const candidates = await getEngineCandidates({
     movetimeMs,
-    multiPV: 5,
-    targetDepth: 10,
+    multiPV,
+    targetDepth,
   });
 
   // If game changed while engine was thinking, ignore result
@@ -522,7 +578,6 @@ function onDragStart(source, piece) {
 }
 
 function onDrop(source, target) {
-  // Drop back on original square = "never mind"
   if (source === target) {
     clearHighlights();
     selectedSquare = null;
@@ -553,18 +608,26 @@ function onSnapEnd() {
 
 // ---------- Controls ----------
 $elo.addEventListener("input", () => {
-  $eloValue.textContent = $elo.value;
+  syncEloUI();
 });
 
 $elo.addEventListener("change", () => {
+  syncEloUI();
+  saveElo();
+
   applyEloToEngine(Number($elo.value));
-  if (engineBusy && sf) sf.postMessage("stop");
+
+  // If slider moved mid-think, stop engine and unlock UI
+  if (engineBusy && sf) {
+    sf.postMessage("stop");
+    engineBusy = false;
+    pendingBestMoveResolver = null;
+    pendingAnalysisResolver = null;
+    setEngineThinking(false);
+  }
 });
 
-$playWhite.addEventListener("change", () => {
-  startNewGame();
-});
-
+$playWhite.addEventListener("change", () => startNewGame());
 $newGame.addEventListener("click", () => startNewGame());
 
 $showMoveSquares?.addEventListener("change", () => {
@@ -586,14 +649,10 @@ $undo.addEventListener("click", () => {
   board.position(game.fen(), true);
   updateStatus();
   renderMoveList();
-
-  // After undo, simplest is to clear last-move highlight (optional: recompute later)
   clearLastMoveHighlight();
 });
 
-$flip.addEventListener("click", () => {
-  board.flip();
-});
+$flip.addEventListener("click", () => board.flip());
 
 function startNewGame() {
   game = new Chess();
@@ -608,17 +667,19 @@ function startNewGame() {
   updateStatus();
   renderMoveList();
 
-  // Reset engine for new game
   if (sf) {
+    if (engineBusy) sf.postMessage("stop");
+
     engineBusy = false;
     pendingBestMoveResolver = null;
+    pendingAnalysisResolver = null;
+    setEngineThinking(false);
 
     engineReady = false;
     sf.postMessage("ucinewgame");
     sf.postMessage("isready");
   }
 
-  // If human chose black, engine should open
   setTimeout(maybeEnginePlays, 0);
 }
 
@@ -634,27 +695,22 @@ function initBoard() {
   });
 
   const boardEl = document.getElementById("board");
-
-  // Remove any previous handlers (in case of hot reloads / re-init)
   boardEl.onclick = null;
 
-  // Click-to-move on the board (sticky pick up / put down)
+  // Click-to-move (sticky pick up / put down)
   boardEl.addEventListener("click", e => {
     if (!$clickToMove?.checked) return;
     if (game.isGameOver()) return;
     if (!isHumansTurn()) return;
 
-    // Prevent the document click handler from firing on board clicks
     e.stopPropagation();
 
-    // Find the clicked square no matter whether you clicked the piece image or the square
     const sqEl = e.target.closest(".square-55d63");
     if (!sqEl) return;
 
     const square = sqEl.getAttribute("data-square");
     if (!square) return;
 
-    // Nothing held: must click your piece to pick up
     if (!selectedSquare) {
       if (!isHumanPieceOn(square)) return;
       selectedSquare = square;
@@ -662,33 +718,26 @@ function initBoard() {
       return;
     }
 
-    // Something is held:
-
-    // Click same square again = cancel ("put it back")
     if (square === selectedSquare) {
       clearHighlights();
       selectedSquare = null;
       return;
     }
 
-    // Clicking another of your pieces switches selection
     if (isHumanPieceOn(square)) {
       selectedSquare = square;
       highlightMovesFrom(square);
       return;
     }
 
-    // Attempt move
     const move = game.move({
       from: selectedSquare,
       to: square,
       promotion: "q",
     });
 
-    // Illegal: keep holding + keep highlights
     if (move === null) return;
 
-    // Legal: commit
     board.position(game.fen(), true);
     updateStatus();
     renderMoveList();
@@ -700,7 +749,7 @@ function initBoard() {
     setTimeout(maybeEnginePlays, 0);
   });
 
-  // Click off-board cancels (REGISTER ONCE)
+  // Click off-board cancels
   document.removeEventListener("click", window.__chesslabCancelClickToMove);
   window.__chesslabCancelClickToMove = function () {
     if (!$clickToMove?.checked) return;
@@ -730,7 +779,6 @@ function setDebugOpen(isOpen) {
     isOpen = localStorage.getItem("chesslab_debug_open") === "1";
   } catch (_) {}
 
-  // Default collapsed
   setDebugOpen(isOpen);
 
   $debugToggle.addEventListener("click", () => {
@@ -741,8 +789,16 @@ function setDebugOpen(isOpen) {
 
 (function main() {
   initBoard();
+
+  // Restore ELO before engine init
+  loadSavedElo();
+
+  // Handle Firefox/Back-Forward cache + form restore mismatch
+  window.addEventListener("pageshow", () => syncEloUI());
+
   initStockfish();
-  $eloValue.textContent = $elo.value;
+
+  setEngineThinking(false);
 
   updateStatus();
   renderMoveList();

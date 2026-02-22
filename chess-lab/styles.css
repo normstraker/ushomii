@@ -107,6 +107,42 @@ body {
   background: rgba(255, 255, 255, 0.02);
   min-height: 44px;
 }
+/* Small inline "thinking" indicator inside status bar */
+.status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.status .engine-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.status .engine-inline[hidden] {
+  display: none !important;
+}
+
+.status .engine-inline .spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+
+/* You already may have this keyframes, but it's fine to have once */
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 .engine-status {
   display: inline-flex;
   align-items: center;
@@ -119,7 +155,9 @@ body {
   color: var(--muted);
   background: rgba(255, 255, 255, 0.03);
 }
-
+.engine-status[hidden] {
+  display: none !important;
+}
 .spinner {
   width: 14px;
   height: 14px;
