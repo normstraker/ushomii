@@ -4,7 +4,40 @@ console.log("app.js loaded");
 
 let game = new Chess();
 let board = null;
+let engineReplyRequested = false;
+let engineReplyTimer = null;
 
+function clearEngineReplyTimer() {
+  if (engineReplyTimer) {
+    clearTimeout(engineReplyTimer);
+    engineReplyTimer = null;
+  }
+}
+
+// Delay that feels human (and not twitchy)
+function computeHumanDelayMs() {
+  const elo = Number($elo.value);
+  const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
+
+  // Bigger + more natural:
+  // low elo: ~900–1500ms
+  // high elo: ~1400–2600ms
+  return Math.round(900 + t * 900 + Math.random() * (600 + t * 200));
+}
+
+function scheduleEngineReplyAfterSnap() {
+  clearEngineReplyTimer();
+
+  const delay = computeHumanDelayMs();
+  engineReplyTimer = setTimeout(() => {
+    engineReplyTimer = null;
+    engineReplyRequested = false;
+
+    if (!game.isGameOver() && !isHumansTurn()) {
+      maybeEnginePlays();
+    }
+  }, delay);
+}
 const $status = document.getElementById("status");
 const $debug = document.getElementById("debug");
 const $moves = document.getElementById("moves");
@@ -556,7 +589,9 @@ async function maybeEnginePlays() {
 
   const move = game.move({ from, to, promotion: promo || "q" });
   if (move) {
-    board.position(game.fen(), true);
+    // Animate the piece sliding
+    board.move(from + "-" + to);
+
     updateStatus();
     renderMoveList();
     highlightLastMove(from, to);
@@ -599,11 +634,17 @@ function onDrop(source, target) {
   clearHighlights();
   selectedSquare = null;
 
-  setTimeout(maybeEnginePlays, 0);
+  // Request engine reply, but wait until snap animation finishes (onSnapEnd)
+  engineReplyRequested = true;
 }
 
 function onSnapEnd() {
   board.position(game.fen());
+
+  // Now that the human move has visually finished, start the engine delay clock
+  if (engineReplyRequested) {
+    scheduleEngineReplyAfterSnap();
+  }
 }
 
 // ---------- Controls ----------
@@ -643,6 +684,10 @@ $showMoveDots?.addEventListener("change", () => {
 $undo.addEventListener("click", () => {
   if (game.history().length === 0) return;
 
+  // Cancel any scheduled engine reply
+  engineReplyRequested = false;
+  clearEngineReplyTimer();
+
   game.undo();
   if (!isHumansTurn() && game.history().length > 0) game.undo();
 
@@ -658,6 +703,10 @@ function startNewGame() {
   game = new Chess();
   board.start(true);
 
+  // Cancel any scheduled engine reply
+  engineReplyRequested = false;
+
+  clearEngineReplyTimer();
   clearDebug();
   clearHighlights();
   clearLastMoveHighlight();
@@ -680,7 +729,17 @@ function startNewGame() {
     sf.postMessage("isready");
   }
 
-  setTimeout(maybeEnginePlays, 0);
+  // --- Human-like engine delay ---
+  const elo = Number($elo.value);
+  const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
+
+  const delay = Math.round(350 + t * 700 + Math.random() * 400);
+
+  setTimeout(() => {
+    if (!game.isGameOver() && !isHumansTurn()) {
+      maybeEnginePlays();
+    }
+  }, delay);
 }
 
 // ---------- Init ----------
@@ -746,7 +805,13 @@ function initBoard() {
     clearHighlights();
     selectedSquare = null;
 
-    setTimeout(maybeEnginePlays, 0);
+    engineReplyRequested = true;
+    clearEngineReplyTimer();
+
+    // Give the browser a tick to paint the human move, then start the “human” delay
+    setTimeout(() => {
+      if (engineReplyRequested) scheduleEngineReplyAfterSnap();
+    }, 50);
   });
 
   // Click off-board cancels
