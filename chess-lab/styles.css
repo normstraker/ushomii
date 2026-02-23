@@ -460,3 +460,32 @@ button:hover {
     max-height: calc(100dvh - 220px);
   }
 }
+/* ==========================
+   Mobile: allow page scrolling
+   ========================== */
+@media (max-width: 900px) {
+  body {
+    overflow: auto; /* allow swipe/scroll */
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .page {
+    height: auto; /* stop forcing a fixed viewport height */
+    min-height: 100dvh;
+  }
+
+  .content {
+    flex: unset; /* remove the "fill remaining height" behavior */
+    min-height: auto;
+  }
+
+  .panel {
+    height: auto; /* let the panel extend naturally */
+    min-height: auto;
+  }
+  .moves-body,
+  #debugBody {
+    max-height: none; /* let them expand */
+    overflow: visible; /* page scroll handles it */
+  }
+}
