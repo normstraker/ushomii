@@ -2,10 +2,119 @@ console.log("app.js loaded");
 
 /* global Chess, Chessboard */
 
+/* ============================================================================
+   ===== GLOBAL STATE =========================================================
+   ============================================================================ */
+
 let game = new Chess();
 let board = null;
+
 let engineReplyRequested = false;
 let engineReplyTimer = null;
+
+// Used to start the board at a restored FEN (or "start")
+let initialPosition = "start";
+
+// Used to restore board orientation ("white" or "black")
+let initialOrientation = "white";
+
+// Click-to-move selection
+let selectedSquare = null;
+
+// Stockfish / engine UI indicator
+let $engineInline = null;
+let thinkingDelayTimer = null;
+
+/* ============================================================================
+   ===== DOM REFERENCES =======================================================
+   ============================================================================ */
+
+const $status = document.getElementById("status");
+const $debug = document.getElementById("debug");
+const $moves = document.getElementById("moves");
+const $elo = document.getElementById("elo");
+const $eloValue = document.getElementById("eloValue");
+const $newGame = document.getElementById("newGame");
+const $undo = document.getElementById("undo");
+const $flip = document.getElementById("flip");
+const $playWhite = document.getElementById("playWhite");
+const $clickToMove = document.getElementById("clickToMove");
+const $showMoveSquares = document.getElementById("showMoveSquares");
+const $showMoveDots = document.getElementById("showMoveDots");
+const $debugCard = document.getElementById("debugCard");
+const $debugToggle = document.getElementById("debugToggle");
+
+/* ============================================================================
+   ===== PERSISTENCE (FEN) ====================================================
+   Save/restore current position using localStorage.
+   ============================================================================ */
+
+const STORAGE_FEN = "chesslab_fen_v1";
+
+function saveFenToStorage() {
+  try {
+    localStorage.setItem(STORAGE_FEN, game.fen());
+  } catch (_) {}
+}
+
+function loadFenFromStorage() {
+  try {
+    return localStorage.getItem(STORAGE_FEN);
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearFenFromStorage() {
+  try {
+    localStorage.removeItem(STORAGE_FEN);
+  } catch (_) {}
+}
+
+const STORAGE_SETTINGS = "chesslab_settings_v1";
+
+function saveSettingsToStorage() {
+  try {
+    const settings = {
+      playWhite: $playWhite?.checked ?? true,
+      clickToMove: $clickToMove?.checked ?? false,
+      showMoveSquares: $showMoveSquares?.checked ?? true,
+      showMoveDots: $showMoveDots?.checked ?? true,
+
+      // Chessboard.js orientation: "white" | "black"
+      orientation: board?.orientation?.() ?? initialOrientation,
+    };
+
+    localStorage.setItem(STORAGE_SETTINGS, JSON.stringify(settings));
+  } catch (_) {}
+}
+
+function loadSettingsFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_SETTINGS);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+function applySettings(settings) {
+  if (!settings) return;
+
+  if ($playWhite) $playWhite.checked = !!settings.playWhite;
+  if ($clickToMove) $clickToMove.checked = !!settings.clickToMove;
+  if ($showMoveSquares) $showMoveSquares.checked = !!settings.showMoveSquares;
+  if ($showMoveDots) $showMoveDots.checked = !!settings.showMoveDots;
+
+  if (settings.orientation === "black" || settings.orientation === "white") {
+    initialOrientation = settings.orientation;
+  }
+}
+
+/* ============================================================================
+   ===== ENGINE REPLY TIMER (HUMAN-LIKE DELAY) ================================
+   ============================================================================ */
 
 function clearEngineReplyTimer() {
   if (engineReplyTimer) {
@@ -38,24 +147,10 @@ function scheduleEngineReplyAfterSnap() {
     }
   }, delay);
 }
-const $status = document.getElementById("status");
-const $debug = document.getElementById("debug");
-const $moves = document.getElementById("moves");
-const $elo = document.getElementById("elo");
-const $eloValue = document.getElementById("eloValue");
-const $newGame = document.getElementById("newGame");
-const $undo = document.getElementById("undo");
-const $flip = document.getElementById("flip");
-const $playWhite = document.getElementById("playWhite");
-const $clickToMove = document.getElementById("clickToMove");
-const $showMoveSquares = document.getElementById("showMoveSquares");
-const $showMoveDots = document.getElementById("showMoveDots");
-const $debugCard = document.getElementById("debugCard");
-const $debugToggle = document.getElementById("debugToggle");
 
-// ---------- Inline engine indicator injected into #status ----------
-let $engineInline = null;
-let thinkingDelayTimer = null;
+/* ============================================================================
+   ===== INLINE ENGINE INDICATOR (Thinking…) =================================
+   ============================================================================ */
 
 function ensureEngineInline() {
   if ($engineInline || !$status) return;
@@ -69,7 +164,10 @@ function ensureEngineInline() {
   $status.appendChild($engineInline);
 }
 
-// ---------- Debug helper ----------
+/* ============================================================================
+   ===== DEBUG OUTPUT =========================================================
+   ============================================================================ */
+
 function logDebug(line) {
   console.log("DEBUG>", line);
   if (!$debug) return;
@@ -78,15 +176,20 @@ function logDebug(line) {
     4000,
   );
 }
+
 function clearDebug() {
   if ($debug) $debug.textContent = "";
 }
 
-// ---------- ELO UI sync + persistence ----------
+/* ============================================================================
+   ===== ELO UI + PERSISTENCE =================================================
+   ============================================================================ */
+
 function syncEloUI() {
   if (!$elo || !$eloValue) return;
   $eloValue.textContent = $elo.value;
 }
+
 function loadSavedElo() {
   try {
     const saved = localStorage.getItem("chesslab_elo");
@@ -94,13 +197,17 @@ function loadSavedElo() {
   } catch (_) {}
   syncEloUI();
 }
+
 function saveElo() {
   try {
     localStorage.setItem("chesslab_elo", String($elo.value));
   } catch (_) {}
 }
 
-// ---------- Engine thinking / UI lock ----------
+/* ============================================================================
+   ===== ENGINE THINKING / UI LOCK ===========================================
+   ============================================================================ */
+
 function setEngineThinking(isThinking) {
   ensureEngineInline();
 
@@ -130,7 +237,10 @@ function setEngineThinking(isThinking) {
   if ($showMoveDots) $showMoveDots.disabled = isThinking;
 }
 
-// ---------- Move list ----------
+/* ============================================================================
+   ===== MOVE LIST ============================================================
+   ============================================================================ */
+
 function renderMoveList() {
   if (!$moves) return;
 
@@ -148,8 +258,9 @@ function renderMoveList() {
   $moves.scrollTo({ top: $moves.scrollHeight, behavior: "smooth" });
 }
 
-// ---------- Board highlights ----------
-let selectedSquare = null;
+/* ============================================================================
+   ===== BOARD HIGHLIGHTS (moves / last move / check) =========================
+   ============================================================================ */
 
 function clearHighlights() {
   $("#board .square-55d63").removeClass(
@@ -221,7 +332,10 @@ function highlightCheck() {
   }
 }
 
-// ---------- Stockfish worker ----------
+/* ============================================================================
+   ===== STOCKFISH WORKER =====================================================
+   ============================================================================ */
+
 let sf = null;
 let engineBusy = false;
 
@@ -490,7 +604,10 @@ function getEngineCandidates({
   });
 }
 
-// ---------- Game flow ----------
+/* ============================================================================
+   ===== GAME FLOW / STATUS ===================================================
+   ============================================================================ */
+
 function updateStatus() {
   let status = "";
   const turn = game.turn() === "w" ? "White" : "Black";
@@ -595,8 +712,15 @@ async function maybeEnginePlays() {
     updateStatus();
     renderMoveList();
     highlightLastMove(from, to);
+
+    // Persist after engine move
+    saveFenToStorage();
   }
 }
+
+/* ============================================================================
+   ===== DRAG / DROP HANDLERS (chessboard.js) =================================
+   ============================================================================ */
 
 function onDragStart(source, piece) {
   if ($clickToMove?.checked) return false;
@@ -619,17 +743,15 @@ function onDrop(source, target) {
     return;
   }
 
-  const move = game.move({
-    from: source,
-    to: target,
-    promotion: "q",
-  });
-
+  const move = game.move({ from: source, to: target, promotion: "q" });
   if (move === null) return "snapback";
 
   updateStatus();
   renderMoveList();
   highlightLastMove(source, target);
+
+  // Persist after human drag move
+  saveFenToStorage();
 
   clearHighlights();
   selectedSquare = null;
@@ -647,7 +769,10 @@ function onSnapEnd() {
   }
 }
 
-// ---------- Controls ----------
+/* ============================================================================
+   ===== CONTROLS (ELO / NEW GAME / UNDO / FLIP / HIGHLIGHTS) =================
+   ============================================================================ */
+
 $elo.addEventListener("input", () => {
   syncEloUI();
 });
@@ -668,7 +793,11 @@ $elo.addEventListener("change", () => {
   }
 });
 
-$playWhite.addEventListener("change", () => startNewGame());
+$playWhite.addEventListener("change", () => {
+  saveSettingsToStorage();
+  startNewGame();
+});
+
 $newGame.addEventListener("click", () => startNewGame());
 
 $showMoveSquares?.addEventListener("change", () => {
@@ -681,6 +810,21 @@ $showMoveDots?.addEventListener("change", () => {
   if (selectedSquare) highlightMovesFrom(selectedSquare);
 });
 
+$clickToMove?.addEventListener("change", () => saveSettingsToStorage());
+
+$showMoveSquares?.addEventListener("change", () => {
+  clearHighlights();
+  if (selectedSquare) highlightMovesFrom(selectedSquare);
+  saveSettingsToStorage();
+});
+
+$showMoveDots?.addEventListener("change", () => {
+  clearHighlights();
+  if (selectedSquare) highlightMovesFrom(selectedSquare);
+  saveSettingsToStorage();
+});
+
+// ===== UNDO CONTROL =====
 $undo.addEventListener("click", () => {
   if (game.history().length === 0) return;
 
@@ -695,18 +839,32 @@ $undo.addEventListener("click", () => {
   updateStatus();
   renderMoveList();
   clearLastMoveHighlight();
+
+  // Persist after undo
+  saveFenToStorage();
 });
 
-$flip.addEventListener("click", () => board.flip());
+$flip.addEventListener("click", () => {
+  board.flip();
+  saveSettingsToStorage();
+});
+
+/* ============================================================================
+   ===== NEW GAME =============================================================
+   ============================================================================ */
 
 function startNewGame() {
   game = new Chess();
   board.start(true);
 
+  // Clear saved game state and save fresh start
+  clearFenFromStorage();
+  saveFenToStorage();
+
   // Cancel any scheduled engine reply
   engineReplyRequested = false;
-
   clearEngineReplyTimer();
+
   clearDebug();
   clearHighlights();
   clearLastMoveHighlight();
@@ -732,7 +890,6 @@ function startNewGame() {
   // --- Human-like engine delay ---
   const elo = Number($elo.value);
   const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
-
   const delay = Math.round(350 + t * 700 + Math.random() * 400);
 
   setTimeout(() => {
@@ -742,10 +899,14 @@ function startNewGame() {
   }, delay);
 }
 
-// ---------- Init ----------
+/* ============================================================================
+   ===== BOARD INIT + CLICK-TO-MOVE ==========================================
+   ============================================================================ */
+
 function initBoard() {
   board = Chessboard("board", {
-    position: "start",
+    position: initialPosition,
+    orientation: initialOrientation, // ✅ restore flip state
     draggable: true,
     pieceTheme: "./vendor/chessboardjs/img/chesspieces/wikipedia/{piece}.png",
     onDragStart,
@@ -770,6 +931,7 @@ function initBoard() {
     const square = sqEl.getAttribute("data-square");
     if (!square) return;
 
+    // 1) Selecting a piece
     if (!selectedSquare) {
       if (!isHumanPieceOn(square)) return;
       selectedSquare = square;
@@ -777,30 +939,35 @@ function initBoard() {
       return;
     }
 
+    // 2) Clicking the same square cancels
     if (square === selectedSquare) {
       clearHighlights();
       selectedSquare = null;
       return;
     }
 
+    // 3) Clicking another of your pieces changes selection
     if (isHumanPieceOn(square)) {
       selectedSquare = square;
       highlightMovesFrom(square);
       return;
     }
 
+    // 4) Try move to destination
     const move = game.move({
       from: selectedSquare,
       to: square,
       promotion: "q",
     });
-
     if (move === null) return;
 
     board.position(game.fen(), true);
     updateStatus();
     renderMoveList();
     highlightLastMove(selectedSquare, square);
+
+    // Persist after click-to-move
+    saveFenToStorage();
 
     clearHighlights();
     selectedSquare = null;
@@ -814,7 +981,7 @@ function initBoard() {
     }, 50);
   });
 
-  // Click off-board cancels
+  // Click off-board cancels selection
   document.removeEventListener("click", window.__chesslabCancelClickToMove);
   window.__chesslabCancelClickToMove = function () {
     if (!$clickToMove?.checked) return;
@@ -824,6 +991,10 @@ function initBoard() {
   };
   document.addEventListener("click", window.__chesslabCancelClickToMove);
 }
+
+/* ============================================================================
+   ===== DEBUG PANEL COLLAPSE STATE ==========================================
+   ============================================================================ */
 
 function setDebugOpen(isOpen) {
   if (!$debugCard) return;
@@ -852,7 +1023,33 @@ function setDebugOpen(isOpen) {
   });
 })();
 
+/* ============================================================================
+   ===== MAIN INIT ============================================================
+   ============================================================================ */
+
 (function main() {
+  // Restore saved game (FEN) before board init so board starts in correct position
+  const savedFen = loadFenFromStorage();
+
+  if (savedFen) {
+    try {
+      game.load(savedFen);
+      initialPosition = savedFen;
+    } catch (_) {
+      // Invalid saved fen -> reset
+      game = new Chess();
+      initialPosition = "start";
+      clearFenFromStorage();
+      saveFenToStorage();
+    }
+  } else {
+    initialPosition = "start";
+  }
+
+  // Restore saved UI settings (play side, highlights, click-to-move, orientation)
+  const savedSettings = loadSettingsFromStorage();
+  applySettings(savedSettings);
+
   initBoard();
 
   // Restore ELO before engine init
@@ -867,6 +1064,9 @@ function setDebugOpen(isOpen) {
 
   updateStatus();
   renderMoveList();
+
+  // Ensure we save at least once on fresh loads
+  saveFenToStorage();
 
   setTimeout(maybeEnginePlays, 0);
 })();
