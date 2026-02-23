@@ -30,8 +30,8 @@ body {
 }
 
 .page {
-  height: 100vh;
-  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
 
@@ -233,6 +233,39 @@ body {
   margin-top: 0;
 }
 
+/* Moves card collapsible behavior */
+#movesCard.is-collapsed .moves-body {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+  overflow: hidden;
+  transition:
+    max-height 220ms ease,
+    opacity 220ms ease,
+    margin-top 220ms ease;
+}
+
+#movesCard.is-open .moves-body {
+  max-height: 600px;
+  opacity: 1;
+  margin-top: 10px;
+  transition:
+    max-height 220ms ease,
+    opacity 220ms ease,
+    margin-top 220ms ease;
+}
+
+/* Make chevron rotate when open */
+#movesCard .card-title .chev {
+  margin-left: auto;
+  transition: transform 180ms ease;
+  transform: rotate(0deg);
+}
+
+#movesCard.is-open .card-title .chev {
+  transform: rotate(90deg);
+}
+
 /* chevron */
 .chev {
   display: inline-block;
@@ -405,5 +438,25 @@ button:hover {
   }
   .board {
     width: min(92vw, 720px);
+  }
+  /* Slightly bigger tap targets on mobile */
+  button {
+    padding: 12px 14px;
+    border-radius: 12px;
+  }
+
+  .check {
+    font-size: 14px;
+  }
+
+  input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+  }
+
+  /* Keep board big on mobile */
+  .board {
+    width: min(96vw, 720px);
+    max-height: calc(100dvh - 220px);
   }
 }

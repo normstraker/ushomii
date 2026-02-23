@@ -43,6 +43,7 @@ const $showMoveSquares = document.getElementById("showMoveSquares");
 const $showMoveDots = document.getElementById("showMoveDots");
 const $debugCard = document.getElementById("debugCard");
 const $debugToggle = document.getElementById("debugToggle");
+const $movesCard = document.getElementById("movesCard");
 
 /* ============================================================================
    ===== PERSISTENCE (FEN) ====================================================
@@ -100,15 +101,22 @@ function loadSettingsFromStorage() {
 }
 
 function applySettings(settings) {
-  if (!settings) return;
+  // If user has saved settings, respect them
+  if (settings) {
+    if ($playWhite) $playWhite.checked = !!settings.playWhite;
+    if ($clickToMove) $clickToMove.checked = !!settings.clickToMove;
+    if ($showMoveSquares) $showMoveSquares.checked = !!settings.showMoveSquares;
+    if ($showMoveDots) $showMoveDots.checked = !!settings.showMoveDots;
 
-  if ($playWhite) $playWhite.checked = !!settings.playWhite;
-  if ($clickToMove) $clickToMove.checked = !!settings.clickToMove;
-  if ($showMoveSquares) $showMoveSquares.checked = !!settings.showMoveSquares;
-  if ($showMoveDots) $showMoveDots.checked = !!settings.showMoveDots;
+    if (settings.orientation === "black" || settings.orientation === "white") {
+      initialOrientation = settings.orientation;
+    }
+    return;
+  }
 
-  if (settings.orientation === "black" || settings.orientation === "white") {
-    initialOrientation = settings.orientation;
+  // No saved settings yet: choose touch-friendly defaults
+  if ($clickToMove && isTouchDevice()) {
+    $clickToMove.checked = true;
   }
 }
 
@@ -810,7 +818,10 @@ $showMoveDots?.addEventListener("change", () => {
   if (selectedSquare) highlightMovesFrom(selectedSquare);
 });
 
-$clickToMove?.addEventListener("change", () => saveSettingsToStorage());
+$clickToMove?.addEventListener("change", () => {
+  saveSettingsToStorage();
+  syncDraggableMode();
+});
 
 $showMoveSquares?.addEventListener("change", () => {
   clearHighlights();
@@ -899,6 +910,17 @@ function startNewGame() {
   }, delay);
 }
 
+function syncDraggableMode() {
+  if (!board) return;
+
+  const wantDrag = !$clickToMove?.checked;
+  // chessboard.js supports changing draggable after init
+  board.draggable = wantDrag;
+
+  // Also update the config if available (some builds expose it)
+  if (board.cfg) board.cfg.draggable = wantDrag;
+}
+
 /* ============================================================================
    ===== BOARD INIT + CLICK-TO-MOVE ==========================================
    ============================================================================ */
@@ -913,6 +935,8 @@ function initBoard() {
     onDrop,
     onSnapEnd,
   });
+
+  syncDraggableMode();
 
   const boardEl = document.getElementById("board");
   boardEl.onclick = null;
@@ -991,7 +1015,113 @@ function initBoard() {
   };
   document.addEventListener("click", window.__chesslabCancelClickToMove);
 }
+/* ============================================================================
+   ===== RESPONSIVE UI (board resize + moves collapse) =========================
+   ============================================================================ */
 
+const STORAGE_MOVES_OPEN = "chesslab_moves_open_v1";
+const MOBILE_BP = 900; // match your CSS breakpoint
+
+function debounce(fn, wait = 120) {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), wait);
+  };
+}
+
+function afterLayoutChange() {
+  // Let DOM reflow, then resize chessboard.js
+  requestAnimationFrame(() => {
+    if (board && typeof board.resize === "function") board.resize();
+  });
+}
+
+const handleWindowResize = debounce(() => {
+  // Auto-collapse moves on mobile widths unless user explicitly opened it
+  enforceMobileMovesRule();
+  afterLayoutChange();
+}, 120);
+
+window.addEventListener("resize", handleWindowResize);
+
+function setMovesOpen(isOpen, { persist = true } = {}) {
+  if (!$movesCard) return;
+
+  $movesCard.classList.toggle("is-open", isOpen);
+  $movesCard.classList.toggle("is-collapsed", !isOpen);
+
+  if (persist) {
+    try {
+      localStorage.setItem(STORAGE_MOVES_OPEN, isOpen ? "1" : "0");
+    } catch (_) {}
+  }
+
+  afterLayoutChange();
+}
+
+function getSavedMovesOpen() {
+  try {
+    const raw = localStorage.getItem(STORAGE_MOVES_OPEN);
+    if (raw === null) return null; // not set
+    return raw === "1";
+  } catch (_) {
+    return null;
+  }
+}
+
+// Rule:
+// - On mobile (< MOBILE_BP), default moves collapsed unless user has a saved pref.
+// - On desktop, default open.
+function enforceMobileMovesRule() {
+  if (!$movesCard) return;
+
+  const saved = getSavedMovesOpen();
+  const isMobile = window.matchMedia(`(max-width: ${MOBILE_BP}px)`).matches;
+
+  if (saved === null) {
+    setMovesOpen(!isMobile, { persist: false });
+    return;
+  }
+
+  // Respect user preference always
+  setMovesOpen(saved, { persist: false });
+}
+
+function initMovesCollapse() {
+  if (!$movesCard) return;
+
+  // Make header clickable (like debug)
+  const titleEl = $movesCard.querySelector(".card-title");
+  if (titleEl) {
+    titleEl.classList.add("collapsible");
+    titleEl.setAttribute("role", "button");
+    titleEl.setAttribute("tabindex", "0");
+
+    // Add chevron if not present
+    if (!titleEl.querySelector(".chev")) {
+      const chev = document.createElement("span");
+      chev.className = "chev";
+      chev.textContent = "▸";
+      titleEl.appendChild(chev);
+    }
+
+    const toggle = () => {
+      const nowOpen = !$movesCard.classList.contains("is-open");
+      setMovesOpen(nowOpen, { persist: true });
+    };
+
+    titleEl.addEventListener("click", toggle);
+    titleEl.addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    });
+  }
+
+  enforceMobileMovesRule();
+}
 /* ============================================================================
    ===== DEBUG PANEL COLLAPSE STATE ==========================================
    ============================================================================ */
@@ -1005,6 +1135,8 @@ function setDebugOpen(isOpen) {
   try {
     localStorage.setItem("chesslab_debug_open", isOpen ? "1" : "0");
   } catch (_) {}
+
+  afterLayoutChange();
 }
 
 (function initDebugCollapse() {
@@ -1023,6 +1155,18 @@ function setDebugOpen(isOpen) {
   });
 })();
 
+/* ============================================================================
+   ===== TOUCH DEVICES ========================================================
+   ============================================================================ */
+
+function isTouchDevice() {
+  // Covers iOS/Android + touch laptops in a reasonable way
+  return (
+    window.matchMedia?.("(pointer: coarse)").matches ||
+    "ontouchstart" in window ||
+    (navigator.maxTouchPoints ?? 0) > 0
+  );
+}
 /* ============================================================================
    ===== MAIN INIT ============================================================
    ============================================================================ */
@@ -1051,6 +1195,7 @@ function setDebugOpen(isOpen) {
   applySettings(savedSettings);
 
   initBoard();
+  initMovesCollapse();
 
   // Restore ELO before engine init
   loadSavedElo();
@@ -1064,6 +1209,7 @@ function setDebugOpen(isOpen) {
 
   updateStatus();
   renderMoveList();
+  afterLayoutChange();
 
   // Ensure we save at least once on fresh loads
   saveFenToStorage();
