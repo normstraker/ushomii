@@ -1,10 +1,37 @@
 :root {
+  /* existing */
   --bg: #0e0f12;
   --card: #171a21;
   --text: #e8e8ea;
   --muted: #a6a7ab;
   --border: #2a2f3a;
   --radius: 14px;
+
+  /* ===== Board theme vars ===== */
+  --sq-light: #f0d9b5;
+  --sq-dark: #b58863;
+
+  /* Move dots */
+  --dot-move: rgba(0, 0, 0, 0.25);
+  --dot-capture: rgba(0, 0, 0, 0.35);
+
+  /* Highlights */
+  --hl-selected: rgba(255, 215, 0, 0.55);
+  --hl-from: rgba(0, 200, 255, 0.55);
+  --hl-last-from: rgba(0, 255, 120, 0.55);
+  --hl-last-to: rgba(0, 255, 120, 0.35);
+
+  /* Check / mate */
+  --hl-check: rgba(255, 0, 0, 0.75);
+  --hl-check-soft: rgba(255, 0, 0, 0.55);
+  --hl-check-strong: rgba(255, 0, 0, 0.85);
+  --hl-check-glow: rgba(255, 0, 0, 0.35);
+
+  /* Coordinates */
+  --coord-on-light: rgba(0, 0, 0, 0.55);
+  --coord-on-dark: rgba(255, 255, 255, 0.6);
+
+  --panel-scroll-height: 220px;
 }
 
 * {
@@ -87,6 +114,28 @@ body {
   height: 100%;
 }
 
+/* Force board square colors from our theme vars */
+#board .white-1e1d7 {
+  background: var(--sq-light) !important;
+}
+#board .black-3c85d {
+  background: var(--sq-dark) !important;
+}
+
+/* Coordinates / notation */
+#board .notation {
+  font-size: 12px;
+  user-select: none;
+}
+
+#board .white-1e1d7 .notation {
+  color: var(--coord-on-light) !important;
+}
+
+#board .black-3c85d .notation {
+  color: var(--coord-on-dark) !important;
+}
+
 .square-move-dot::after {
   content: "";
   position: absolute;
@@ -96,7 +145,7 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--dot-move);
   pointer-events: none;
 }
 .status {
@@ -172,13 +221,17 @@ body {
     transform: rotate(360deg);
   }
 }
+
 .panel {
   display: grid;
   gap: 12px;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: 1fr;
 
   height: 100%;
   min-height: 0; /* CRITICAL */
+
+  overflow: hidden; /* contain internal scrolls */
+  overscroll-behavior: contain;
 }
 
 .card {
@@ -215,6 +268,31 @@ body {
   outline-offset: 4px;
 }
 
+/* ==========================
+   Panel Scroll Areas
+   ========================== */
+
+/* Debug scrolls via its <pre> */
+#debug {
+  max-height: var(--panel-scroll-height);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Moves scroll container */
+#movesBody {
+  max-height: var(--panel-scroll-height);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Theme scroll container */
+#themeBody .theme-body {
+  max-height: var(--panel-scroll-height);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 /* Collapsible body */
 .collapsible-body {
   margin-top: 10px;
@@ -226,6 +304,57 @@ body {
   opacity: 1;
 }
 
+/* Theme card collapsed state */
+#themeCard.is-collapsed .collapsible-body {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+}
+
+#themeCard.is-open .chev {
+  transform: rotate(90deg);
+}
+
+/* Theme panel layout */
+.theme-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.theme-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.theme-row span {
+  color: var(--muted);
+}
+
+.theme-row input[type="color"] {
+  width: 44px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.theme-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+  opacity: 0.8;
+}
+
+.theme-actions {
+  margin-top: 6px;
+}
+
 /* collapsed state */
 #debugCard.is-collapsed .collapsible-body {
   max-height: 0;
@@ -233,26 +362,12 @@ body {
   margin-top: 0;
 }
 
-/* Moves card collapsible behavior */
-#movesCard.is-collapsed .moves-body {
+/* Moves collapsed state (same pattern as Theme/Debug) */
+#movesCard.is-collapsed #movesBody {
   max-height: 0;
   opacity: 0;
   margin-top: 0;
   overflow: hidden;
-  transition:
-    max-height 220ms ease,
-    opacity 220ms ease,
-    margin-top 220ms ease;
-}
-
-#movesCard.is-open .moves-body {
-  max-height: 600px;
-  opacity: 1;
-  margin-top: 10px;
-  transition:
-    max-height 220ms ease,
-    opacity 220ms ease,
-    margin-top 220ms ease;
 }
 
 /* Make chevron rotate when open */
@@ -276,22 +391,10 @@ body {
 #debugCard.is-open .chev {
   transform: rotate(90deg);
 }
-#debugBody {
-  max-height: 220px; /* or whatever feels right */
-  overflow: auto;
-}
-#movesCard {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
 
-.moves-body {
-  min-height: 0;
-  flex: 1;
-  overflow: auto;
+/* .moves-body {
   margin-top: 10px;
-}
+} */
 
 .label-row {
   display: flex;
@@ -351,9 +454,8 @@ button:hover {
   color: var(--muted);
   font-size: 12px;
   margin: 0;
-  max-height: 240px;
-  overflow: auto;
 }
+
 .moves {
   white-space: pre;
   font-family:
@@ -366,41 +468,40 @@ button:hover {
 
 /* Highlight squares */
 .square-highlight {
-  box-shadow: inset 0 0 0 4px rgba(255, 215, 0, 0.55);
+  box-shadow: inset 0 0 0 4px var(--hl-selected);
 }
 
 .square-highlight-from {
-  box-shadow: inset 0 0 0 4px rgba(0, 200, 255, 0.55);
+  box-shadow: inset 0 0 0 4px var(--hl-from);
 }
 
-/* Last move highlight */
 .square-last-from {
-  box-shadow: inset 0 0 0 4px rgba(0, 255, 120, 0.55);
+  box-shadow: inset 0 0 0 4px var(--hl-last-from);
 }
 
 .square-last-to {
-  box-shadow: inset 0 0 0 4px rgba(0, 255, 120, 0.35);
+  box-shadow: inset 0 0 0 4px var(--hl-last-to);
 }
-/* King in check (pulsing red glow) */
+/* King in check (pulsing glow) */
 .square-check {
-  box-shadow: inset 0 0 0 4px rgba(255, 0, 0, 0.75);
+  box-shadow: inset 0 0 0 4px var(--hl-check);
   animation: checkPulse 0.9s ease-in-out infinite;
 }
 
 @keyframes checkPulse {
   0% {
     box-shadow:
-      inset 0 0 0 4px rgba(255, 0, 0, 0.55),
+      inset 0 0 0 4px var(--hl-check-soft),
       0 0 0 0 rgba(255, 0, 0, 0);
   }
   50% {
     box-shadow:
-      inset 0 0 0 4px rgba(255, 0, 0, 0.85),
-      0 0 18px 6px rgba(255, 0, 0, 0.35);
+      inset 0 0 0 4px var(--hl-check-strong),
+      0 0 18px 6px var(--hl-check-glow);
   }
   100% {
     box-shadow:
-      inset 0 0 0 4px rgba(255, 0, 0, 0.55),
+      inset 0 0 0 4px var(--hl-check-soft),
       0 0 0 0 rgba(255, 0, 0, 0);
   }
 }
@@ -483,9 +584,11 @@ button:hover {
     height: auto; /* let the panel extend naturally */
     min-height: auto;
   }
+
   .moves-body,
-  #debugBody {
-    max-height: none; /* let them expand */
-    overflow: visible; /* page scroll handles it */
+  #debugBody,
+  #themeBody .theme-body {
+    max-height: none;
+    overflow: visible;
   }
 }

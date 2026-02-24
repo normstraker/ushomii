@@ -68,7 +68,8 @@
             />
 
             <div class="hint">
-              Left = more blunders. Right = less blunders. Center = normal for ELOgit .
+              Left = more blunders. Right = less blunders. Center = normal for
+              ELO.
             </div>
             <div class="row">
               <label class="check">
@@ -107,10 +108,87 @@
               <button id="flip">Flip</button>
             </div>
           </div>
+          <div class="card" id="themeCard">
+            <button
+              class="card-title collapsible"
+              id="themeToggle"
+              type="button"
+            >
+              Theme <span class="chev" id="themeChev">▸</span>
+            </button>
+
+            <div class="collapsible-body" id="themeBody">
+              <div class="theme-body">
+                <div class="theme-grid">
+                  <label class="theme-row">
+                    <span>Light squares</span>
+                    <input id="themeSqLight" type="color" value="#f0d9b5" />
+                  </label>
+
+                  <label class="theme-row">
+                    <span>Dark squares</span>
+                    <input id="themeSqDark" type="color" value="#b58863" />
+                  </label>
+
+                  <div class="theme-divider"></div>
+
+                  <label class="theme-row">
+                    <span>Selected square</span>
+                    <input id="themeHlSelected" type="color" value="#ffd700" />
+                  </label>
+
+                  <label class="theme-row">
+                    <span>Last move (from)</span>
+                    <input id="themeHlLastFrom" type="color" value="#00ff78" />
+                  </label>
+
+                  <label class="theme-row">
+                    <span>Last move (to)</span>
+                    <input id="themeHlLastTo" type="color" value="#00ff78" />
+                  </label>
+
+                  <label class="theme-row">
+                    <span>Check highlight</span>
+                    <input id="themeHlCheck" type="color" value="#ff0000" />
+                  </label>
+
+                  <div class="theme-divider"></div>
+
+                  <label class="theme-row">
+                    <span>Move dots</span>
+                    <input id="themeDotMove" type="color" value="#000000" />
+                  </label>
+
+                  <label class="theme-row">
+                    <span>Coords on light</span>
+                    <input id="themeCoordLight" type="color" value="#000000" />
+                  </label>
+
+                  <label class="theme-row">
+                    <span>Coords on dark</span>
+                    <input id="themeCoordDark" type="color" value="#ffffff" />
+                  </label>
+
+                  <div class="row theme-actions">
+                    <button id="themeReset" type="button">Reset</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="card" id="movesCard">
-            <div class="card-title">Moves</div>
-            <div class="moves-body">
-              <pre id="moves" class="moves"></pre>
+            <button
+              class="card-title collapsible"
+              id="movesToggle"
+              type="button"
+            >
+              Moves <span class="chev" id="movesChev">▸</span>
+            </button>
+
+            <div class="collapsible-body" id="movesBody">
+              <div class="moves-body">
+                <pre id="moves" class="moves"></pre>
+              </div>
             </div>
           </div>
 

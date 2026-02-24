@@ -46,6 +46,18 @@ const $debugToggle = document.getElementById("debugToggle");
 const $movesCard = document.getElementById("movesCard");
 const $blunder = document.getElementById("blunder");
 const $blunderValue = document.getElementById("blunderValue");
+const $themeCard = document.getElementById("themeCard");
+const $themeToggle = document.getElementById("themeToggle");
+const $themeSqLight = document.getElementById("themeSqLight");
+const $themeSqDark = document.getElementById("themeSqDark");
+const $themeHlSelected = document.getElementById("themeHlSelected");
+const $themeHlLastFrom = document.getElementById("themeHlLastFrom");
+const $themeHlLastTo = document.getElementById("themeHlLastTo");
+const $themeHlCheck = document.getElementById("themeHlCheck");
+const $themeDotMove = document.getElementById("themeDotMove");
+const $themeCoordLight = document.getElementById("themeCoordLight");
+const $themeCoordDark = document.getElementById("themeCoordDark");
+const $themeReset = document.getElementById("themeReset");
 
 /* ============================================================================
    ===== PERSISTENCE (FEN) ====================================================
@@ -120,6 +132,168 @@ function applySettings(settings) {
   if ($clickToMove && isTouchDevice()) {
     $clickToMove.checked = true;
   }
+}
+
+/* ============================================================================
+   ===== THEME (CSS VARS + localStorage) ======================================
+   Live update board/UI colors via CSS variables.
+   ============================================================================ */
+
+const STORAGE_THEME = "chesslab_theme_v1";
+
+/**
+ * remark: Convert #rrggbb (or #rgb) to rgba(r,g,b,a)
+ * We use this for highlights/dots where your CSS expects an alpha.
+ */
+function hexToRgba(hex, alpha = 1) {
+  if (!hex) return `rgba(0,0,0,${alpha})`;
+
+  let h = String(hex).trim();
+  if (!h.startsWith("#")) h = "#" + h;
+
+  // Expand #rgb -> #rrggbb
+  if (h.length === 4) {
+    h = "#" + h[1] + h[1] + h[2] + h[2] + h[3] + h[3];
+  }
+
+  const r = parseInt(h.slice(1, 3), 16);
+  const g = parseInt(h.slice(3, 5), 16);
+  const b = parseInt(h.slice(5, 7), 16);
+
+  // Fallback if parse fails
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
+    return `rgba(0,0,0,${alpha})`;
+  }
+
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/**
+ * remark: Single place to set any theme variable.
+ * This updates the page instantly.
+ */
+function setThemeVar(name, value) {
+  try {
+    document.documentElement.style.setProperty(name, value);
+  } catch (_) {}
+}
+
+function getDefaultTheme() {
+  // remark: These defaults should match your CSS :root defaults.
+  // We'll keep them here so Reset is deterministic.
+  return {
+    "--sq-light": "#f0d9b5",
+    "--sq-dark": "#b58863",
+
+    // Highlights (your CSS uses these as box-shadow colors)
+    "--hl-selected": hexToRgba("#ffd700", 0.55),
+    "--hl-last-from": hexToRgba("#00ff78", 0.55),
+    "--hl-last-to": hexToRgba("#00ff78", 0.35),
+
+    // Check pulse vars (used inside keyframes too)
+    "--hl-check": hexToRgba("#ff0000", 0.75),
+    "--hl-check-soft": hexToRgba("#ff0000", 0.55),
+    "--hl-check-strong": hexToRgba("#ff0000", 0.85),
+    "--hl-check-glow": hexToRgba("#ff0000", 0.35),
+
+    // Dots
+    "--dot-move": hexToRgba("#000000", 0.25),
+
+    // Coordinates (keep slightly transparent by default)
+    "--coord-on-light": hexToRgba("#000000", 0.55),
+    "--coord-on-dark": hexToRgba("#ffffff", 0.6),
+  };
+}
+
+function saveThemeToStorage(themeObj) {
+  try {
+    localStorage.setItem(STORAGE_THEME, JSON.stringify(themeObj));
+  } catch (_) {}
+}
+
+function loadThemeFromStorage() {
+  try {
+    const raw = localStorage.getItem(STORAGE_THEME);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * remark: Apply a theme object of CSS vars -> values.
+ */
+function applyTheme(themeObj) {
+  if (!themeObj) return;
+  for (const [k, v] of Object.entries(themeObj)) {
+    setThemeVar(k, v);
+  }
+}
+
+/**
+ * remark: Read current control values and build a theme object that matches our CSS vars.
+ * This is what we save.
+ */
+function buildThemeFromInputs() {
+  return {
+    "--sq-light": $themeSqLight?.value ?? "#f0d9b5",
+    "--sq-dark": $themeSqDark?.value ?? "#b58863",
+
+    "--hl-selected": hexToRgba($themeHlSelected?.value ?? "#ffd700", 0.55),
+    "--hl-last-from": hexToRgba($themeHlLastFrom?.value ?? "#00ff78", 0.55),
+    "--hl-last-to": hexToRgba($themeHlLastTo?.value ?? "#00ff78", 0.35),
+
+    "--hl-check": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.75),
+    "--hl-check-soft": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.55),
+    "--hl-check-strong": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.85),
+    "--hl-check-glow": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.35),
+
+    "--dot-move": hexToRgba($themeDotMove?.value ?? "#000000", 0.25),
+
+    "--coord-on-light": hexToRgba($themeCoordLight?.value ?? "#000000", 0.55),
+    "--coord-on-dark": hexToRgba($themeCoordDark?.value ?? "#ffffff", 0.6),
+  };
+}
+
+/**
+ * remark: Keep inputs in sync with whatever theme is currently applied.
+ * Since some vars store rgba(...) and inputs want hex, we use the inputs as the "source of truth"
+ * during sessions — and on load we set inputs to defaults first, then override from saved theme.
+ */
+function setInputsToDefaults() {
+  if ($themeSqLight) $themeSqLight.value = "#f0d9b5";
+  if ($themeSqDark) $themeSqDark.value = "#b58863";
+
+  if ($themeHlSelected) $themeHlSelected.value = "#ffd700";
+  if ($themeHlLastFrom) $themeHlLastFrom.value = "#00ff78";
+  if ($themeHlLastTo) $themeHlLastTo.value = "#00ff78";
+  if ($themeHlCheck) $themeHlCheck.value = "#ff0000";
+
+  if ($themeDotMove) $themeDotMove.value = "#000000";
+
+  if ($themeCoordLight) $themeCoordLight.value = "#000000";
+  if ($themeCoordDark) $themeCoordDark.value = "#ffffff";
+}
+
+/**
+ * remark: Apply from inputs (live) + save.
+ */
+function applyAndSaveThemeFromInputs() {
+  const themeObj = buildThemeFromInputs();
+  applyTheme(themeObj);
+  saveThemeToStorage(themeObj);
+
+  // remark: Changing square sizes/colors can affect board render a tiny bit; safe resize.
+  afterLayoutChange();
+}
+
+function resetThemeToDefaults() {
+  setInputsToDefaults();
+  const themeObj = getDefaultTheme();
+  applyTheme(themeObj);
+  saveThemeToStorage(themeObj);
+  afterLayoutChange();
 }
 
 /* ============================================================================
@@ -1136,39 +1310,104 @@ function enforceMobileMovesRule() {
 }
 
 function initMovesCollapse() {
-  if (!$movesCard) return;
+  const $movesToggle = document.getElementById("movesToggle");
+  if (!$movesCard || !$movesToggle) return;
 
-  // Make header clickable (like debug)
-  const titleEl = $movesCard.querySelector(".card-title");
-  if (titleEl) {
-    titleEl.classList.add("collapsible");
-    titleEl.setAttribute("role", "button");
-    titleEl.setAttribute("tabindex", "0");
+  const toggle = () => {
+    const nowOpen = !$movesCard.classList.contains("is-open");
+    setMovesOpen(nowOpen, { persist: true });
+  };
 
-    // Add chevron if not present
-    if (!titleEl.querySelector(".chev")) {
-      const chev = document.createElement("span");
-      chev.className = "chev";
-      chev.textContent = "▸";
-      titleEl.appendChild(chev);
+  $movesToggle.addEventListener("click", toggle);
+  $movesToggle.addEventListener("keydown", e => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      toggle();
     }
-
-    const toggle = () => {
-      const nowOpen = !$movesCard.classList.contains("is-open");
-      setMovesOpen(nowOpen, { persist: true });
-    };
-
-    titleEl.addEventListener("click", toggle);
-    titleEl.addEventListener("keydown", e => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        toggle();
-      }
-    });
-  }
+  });
 
   enforceMobileMovesRule();
 }
+
+/* ============================================================================
+   ===== THEME PANEL COLLAPSE STATE ==========================================
+   ============================================================================ */
+
+function setThemeOpen(isOpen) {
+  if (!$themeCard) return;
+
+  $themeCard.classList.toggle("is-open", isOpen);
+  $themeCard.classList.toggle("is-collapsed", !isOpen);
+
+  try {
+    localStorage.setItem("chesslab_theme_open", isOpen ? "1" : "0");
+  } catch (_) {}
+
+  afterLayoutChange();
+}
+
+function initThemeCollapse() {
+  if (!$themeCard || !$themeToggle) return;
+
+  let isOpen = false;
+  try {
+    isOpen = localStorage.getItem("chesslab_theme_open") === "1";
+  } catch (_) {}
+
+  setThemeOpen(isOpen);
+
+  $themeToggle.addEventListener("click", () => {
+    const nowOpen = !$themeCard.classList.contains("is-open");
+    setThemeOpen(nowOpen);
+  });
+}
+
+/* ============================================================================
+   ===== THEME EVENTS (color pickers) ========================================
+   ============================================================================ */
+
+function initThemeControls() {
+  // remark: If the Theme panel isn't in the HTML yet, do nothing safely.
+  if (
+    !$themeSqLight ||
+    !$themeSqDark ||
+    !$themeHlSelected ||
+    !$themeHlLastFrom ||
+    !$themeHlLastTo ||
+    !$themeHlCheck ||
+    !$themeDotMove ||
+    !$themeCoordLight ||
+    !$themeCoordDark
+  ) {
+    return;
+  }
+
+  // remark: Apply on input for instant feedback, and persist.
+  const handlers = [
+    $themeSqLight,
+    $themeSqDark,
+    $themeHlSelected,
+    $themeHlLastFrom,
+    $themeHlLastTo,
+    $themeHlCheck,
+    $themeDotMove,
+    $themeCoordLight,
+    $themeCoordDark,
+  ];
+
+  handlers.forEach(el => {
+    el.addEventListener("input", () => {
+      applyAndSaveThemeFromInputs();
+    });
+  });
+
+  if ($themeReset) {
+    $themeReset.addEventListener("click", () => {
+      resetThemeToDefaults();
+    });
+  }
+}
+
 /* ============================================================================
    ===== DEBUG PANEL COLLAPSE STATE ==========================================
    ============================================================================ */
@@ -1241,8 +1480,27 @@ function isTouchDevice() {
   const savedSettings = loadSettingsFromStorage();
   applySettings(savedSettings);
 
+  // remark: Theme init - set input defaults first (so inputs have sane values)
+  setInputsToDefaults();
+
+  // remark: If user has a saved theme, apply it now
+  const savedTheme = loadThemeFromStorage();
+  if (savedTheme) {
+    applyTheme(savedTheme);
+    // remark: We keep inputs as the user's current selections (defaults + any later changes)
+    // To keep it simple, we DON'T attempt to reverse rgba(...) back into hex.
+    // Inputs still control the next change.
+  } else {
+    // remark: Ensure defaults are actually applied on first run
+    applyTheme(getDefaultTheme());
+  }
+
   initBoard();
   initMovesCollapse();
+
+  // remark: Theme panel (collapse + color pickers)
+  initThemeCollapse();
+  initThemeControls();
 
   // Restore ELO before engine init
   loadSavedElo();
