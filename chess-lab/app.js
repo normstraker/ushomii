@@ -44,6 +44,8 @@ const $showMoveDots = document.getElementById("showMoveDots");
 const $debugCard = document.getElementById("debugCard");
 const $debugToggle = document.getElementById("debugToggle");
 const $movesCard = document.getElementById("movesCard");
+const $blunder = document.getElementById("blunder");
+const $blunderValue = document.getElementById("blunderValue");
 
 /* ============================================================================
    ===== PERSISTENCE (FEN) ====================================================
@@ -209,6 +211,25 @@ function loadSavedElo() {
 function saveElo() {
   try {
     localStorage.setItem("chesslab_elo", String($elo.value));
+  } catch (_) {}
+}
+
+function syncBlunderUI() {
+  if (!$blunder || !$blunderValue) return;
+  $blunderValue.textContent = $blunder.value;
+}
+
+function loadSavedBlunder() {
+  try {
+    const saved = localStorage.getItem("chesslab_blunder");
+    if (saved !== null && $blunder) $blunder.value = saved;
+  } catch (_) {}
+  syncBlunderUI();
+}
+
+function saveBlunder() {
+  try {
+    localStorage.setItem("chesslab_blunder", String($blunder.value));
   } catch (_) {}
 }
 
@@ -653,8 +674,25 @@ function chooseHumanMove(candidates, elo) {
 
   // ELO -> blunder behavior
   const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
-  const blunderChance = (1 - t) * 0.28;
-  const maxDrop = 500 - t * 450;
+  // Base behavior from ELO
+  let blunderChance = (1 - t) * 0.28;
+  let maxDrop = 500 - t * 450;
+
+  // Blunder slider tweak (-100..+100), center=0
+  const b = Number($blunder?.value ?? 0); // -100..100
+  const u = Math.max(-1, Math.min(1, b / 100)); // -1..1
+
+  // Left (u<0): more blunders + bigger drops
+  // Right (u>0): fewer blunders + smaller drops
+  const chanceMult = u < 0 ? 1 + -u * 1.25 : 1 - u * 0.75; // up to +125% / down to -75%
+  const dropMult = u < 0 ? 1 + -u * 0.9 : 1 - u * 0.6; // up to +90% / down to -60%
+
+  blunderChance *= chanceMult;
+  maxDrop *= dropMult;
+
+  // Clamp to sane bounds
+  blunderChance = Math.max(0, Math.min(0.9, blunderChance));
+  maxDrop = Math.max(30, Math.min(900, maxDrop));
 
   // Slightly fewer blunders when position is "easy"
   const situational = Math.max(0.4, Math.min(1.0, 1 - (bestCp / 800) * 0.25));
@@ -833,6 +871,15 @@ $showMoveDots?.addEventListener("change", () => {
   clearHighlights();
   if (selectedSquare) highlightMovesFrom(selectedSquare);
   saveSettingsToStorage();
+});
+
+$blunder?.addEventListener("input", () => {
+  syncBlunderUI();
+});
+
+$blunder?.addEventListener("change", () => {
+  syncBlunderUI();
+  saveBlunder();
 });
 
 // ===== UNDO CONTROL =====
@@ -1200,8 +1247,13 @@ function isTouchDevice() {
   // Restore ELO before engine init
   loadSavedElo();
 
+  loadSavedBlunder();
+
   // Handle Firefox/Back-Forward cache + form restore mismatch
-  window.addEventListener("pageshow", () => syncEloUI());
+  window.addEventListener("pageshow", () => {
+    syncEloUI();
+    syncBlunderUI();
+  });
 
   initStockfish();
 

@@ -53,6 +53,23 @@
               step="50"
               value="1200"
             />
+            <label class="label-row" for="blunder">
+              <span>Blunder</span>
+              <span class="value" id="blunderValue">0</span>
+            </label>
+
+            <input
+              id="blunder"
+              type="range"
+              min="-100"
+              max="100"
+              step="5"
+              value="0"
+            />
+
+            <div class="hint">
+              Left = more mistakes. Right = fewer mistakes. Center = normal.
+            </div>
             <div class="row">
               <label class="check">
                 <input id="clickToMove" type="checkbox" checked />
