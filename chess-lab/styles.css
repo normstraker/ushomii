@@ -1,3 +1,13 @@
+/* =========================================================
+   Chess Lab — styles.css
+   Sections are labeled so we can quickly find things.
+   Search for: [SECTION: ...]
+   ========================================================= */
+
+/* =========================================================
+   [SECTION: Theme Variables]
+   Everything that should be "themeable" lives here.
+   ========================================================= */
 :root {
   /* existing */
   --bg: #0e0f12;
@@ -11,10 +21,6 @@
   --sq-light: #f0d9b5;
   --sq-dark: #b58863;
 
-  /* Move dots */
-  --dot-move: rgba(0, 0, 0, 0.25);
-  --dot-capture: rgba(0, 0, 0, 0.35);
-
   /* Highlights */
   --hl-selected: rgba(255, 215, 0, 0.55);
   --hl-from: rgba(0, 200, 255, 0.55);
@@ -27,13 +33,12 @@
   --hl-check-strong: rgba(255, 0, 0, 0.85);
   --hl-check-glow: rgba(255, 0, 0, 0.35);
 
-  /* Coordinates */
-  --coord-on-light: rgba(0, 0, 0, 0.55);
-  --coord-on-dark: rgba(255, 255, 255, 0.6);
-
   --panel-scroll-height: 220px;
 }
 
+/* =========================================================
+   [SECTION: Global Reset + Page Layout]
+   ========================================================= */
 * {
   box-sizing: border-box;
 }
@@ -92,6 +97,11 @@ body {
   flex: 1;
   min-height: 0; /* CRITICAL for grids inside */
 }
+
+/* =========================================================
+   [SECTION: Board Container + Sizing]
+   IMPORTANT: we size the board via .board / #board, NOT squares.
+   ========================================================= */
 .board-wrap {
   display: grid;
   gap: 12px;
@@ -114,7 +124,10 @@ body {
   height: 100%;
 }
 
-/* Force board square colors from our theme vars */
+/* =========================================================
+   [SECTION: Chessboard.js Theme Overrides]
+   These override the built-in light/dark squares.
+   ========================================================= */
 #board .white-1e1d7 {
   background: var(--sq-light) !important;
 }
@@ -122,20 +135,43 @@ body {
   background: var(--sq-dark) !important;
 }
 
-/* Coordinates / notation */
-#board .notation {
+/* =========================================================
+   [SECTION: Coordinates / Notation Colors]
+   BUGFIX: chessboard.js often uses hashed notation classes
+   like .notation-322f9, not plain .notation.
+   We target ANY class containing "notation" to be safe.
+   ========================================================= */
+
+/* Base notation styling (applies to hashed classes too) */
+#board [class*="notation"] {
   font-size: 12px;
   user-select: none;
 }
 
-#board .white-1e1d7 .notation {
+/* Coords on light squares */
+#board .white-1e1d7 [class*="notation"] {
   color: var(--coord-on-light) !important;
 }
 
-#board .black-3c85d .notation {
+/* Coords on dark squares */
+#board .black-3c85d [class*="notation"] {
   color: var(--coord-on-dark) !important;
 }
 
+/* =========================================================
+   [SECTION: Move Dots]
+   You currently draw dots using .square-move-dot::after.
+   Two improvements:
+   1) Ensure squares are a positioning context (relative)
+   2) Add capture variant hook + "force" the color vars
+   ========================================================= */
+
+/* Make sure pseudo-elements anchor correctly */
+#board .square-55d63 {
+  position: relative;
+}
+
+/* Normal move dot (center dot) */
 .square-move-dot::after {
   content: "";
   position: absolute;
@@ -145,9 +181,27 @@ body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: var(--dot-move);
+  background: var(--dot-move) !important; /* force theme var */
   pointer-events: none;
 }
+
+/* OPTIONAL: if you add "square-capture-dot" in JS later */
+.square-capture-dot::after {
+  content: "";
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--dot-capture) !important;
+  pointer-events: none;
+}
+
+/* =========================================================
+   [SECTION: Status Bar + Engine Indicator]
+   ========================================================= */
 .status {
   color: var(--muted);
   padding: 10px 12px;
@@ -156,6 +210,7 @@ body {
   background: rgba(255, 255, 255, 0.02);
   min-height: 44px;
 }
+
 /* Small inline "thinking" indicator inside status bar */
 .status {
   display: flex;
@@ -192,6 +247,7 @@ body {
     transform: rotate(360deg);
   }
 }
+
 .engine-status {
   display: inline-flex;
   align-items: center;
@@ -222,6 +278,9 @@ body {
   }
 }
 
+/* =========================================================
+   [SECTION: Right Panel Layout + Cards]
+   ========================================================= */
 .panel {
   display: grid;
   gap: 12px;
@@ -268,9 +327,9 @@ body {
   outline-offset: 4px;
 }
 
-/* ==========================
-   Panel Scroll Areas
-   ========================== */
+/* =========================================================
+   [SECTION: Panel Scroll Areas]
+   ========================================================= */
 
 /* Debug scrolls via its <pre> */
 #debug {
@@ -291,6 +350,31 @@ body {
   max-height: var(--panel-scroll-height);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+
+  /* NEW: reserve space so scrollbar doesn't cover inputs */
+  scrollbar-gutter: stable;
+
+  /* NEW: extra breathing room as fallback for browsers
+     that ignore scrollbar-gutter (older Safari, etc.) */
+  padding-right: 12px;
+}
+
+#debug,
+#movesBody,
+#themeBody .theme-body {
+  scrollbar-gutter: stable;
+  padding-right: 12px;
+}
+
+/* Optional: make the scrollbar a predictable width (WebKit browsers) */
+#themeBody .theme-body::-webkit-scrollbar {
+  width: 12px;
+}
+
+#themeBody .theme-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
 }
 
 /* Collapsible body */
@@ -392,10 +476,9 @@ body {
   transform: rotate(90deg);
 }
 
-/* .moves-body {
-  margin-top: 10px;
-} */
-
+/* =========================================================
+   [SECTION: Controls]
+   ========================================================= */
 .label-row {
   display: flex;
   justify-content: space-between;
@@ -449,6 +532,9 @@ button:hover {
   font-size: 13px;
 }
 
+/* =========================================================
+   [SECTION: Text Areas]
+   ========================================================= */
 .debug {
   white-space: pre-wrap;
   color: var(--muted);
@@ -466,7 +552,9 @@ button:hover {
   margin: 0;
 }
 
-/* Highlight squares */
+/* =========================================================
+   [SECTION: Highlights + Check States]
+   ========================================================= */
 .square-highlight {
   box-shadow: inset 0 0 0 4px var(--hl-selected);
 }
@@ -482,6 +570,7 @@ button:hover {
 .square-last-to {
   box-shadow: inset 0 0 0 4px var(--hl-last-to);
 }
+
 /* King in check (pulsing glow) */
 .square-check {
   box-shadow: inset 0 0 0 4px var(--hl-check);
@@ -533,6 +622,9 @@ button:hover {
   }
 }
 
+/* =========================================================
+   [SECTION: Responsive Layout]
+   ========================================================= */
 @media (max-width: 900px) {
   .content {
     grid-template-columns: 1fr;
@@ -540,6 +632,7 @@ button:hover {
   .board {
     width: min(92vw, 720px);
   }
+
   /* Slightly bigger tap targets on mobile */
   button {
     padding: 12px 14px;
@@ -561,9 +654,10 @@ button:hover {
     max-height: calc(100dvh - 220px);
   }
 }
-/* ==========================
-   Mobile: allow page scrolling
-   ========================== */
+
+/* =========================================================
+   [SECTION: Mobile Scroll Behavior]
+   ========================================================= */
 @media (max-width: 900px) {
   body {
     overflow: auto; /* allow swipe/scroll */

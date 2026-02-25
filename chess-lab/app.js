@@ -54,9 +54,6 @@ const $themeHlSelected = document.getElementById("themeHlSelected");
 const $themeHlLastFrom = document.getElementById("themeHlLastFrom");
 const $themeHlLastTo = document.getElementById("themeHlLastTo");
 const $themeHlCheck = document.getElementById("themeHlCheck");
-const $themeDotMove = document.getElementById("themeDotMove");
-const $themeCoordLight = document.getElementById("themeCoordLight");
-const $themeCoordDark = document.getElementById("themeCoordDark");
 const $themeReset = document.getElementById("themeReset");
 
 /* ============================================================================
@@ -195,13 +192,6 @@ function getDefaultTheme() {
     "--hl-check-soft": hexToRgba("#ff0000", 0.55),
     "--hl-check-strong": hexToRgba("#ff0000", 0.85),
     "--hl-check-glow": hexToRgba("#ff0000", 0.35),
-
-    // Dots
-    "--dot-move": hexToRgba("#000000", 0.25),
-
-    // Coordinates (keep slightly transparent by default)
-    "--coord-on-light": hexToRgba("#000000", 0.55),
-    "--coord-on-dark": hexToRgba("#ffffff", 0.6),
   };
 }
 
@@ -248,11 +238,6 @@ function buildThemeFromInputs() {
     "--hl-check-soft": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.55),
     "--hl-check-strong": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.85),
     "--hl-check-glow": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.35),
-
-    "--dot-move": hexToRgba($themeDotMove?.value ?? "#000000", 0.25),
-
-    "--coord-on-light": hexToRgba($themeCoordLight?.value ?? "#000000", 0.55),
-    "--coord-on-dark": hexToRgba($themeCoordDark?.value ?? "#ffffff", 0.6),
   };
 }
 
@@ -269,11 +254,6 @@ function setInputsToDefaults() {
   if ($themeHlLastFrom) $themeHlLastFrom.value = "#00ff78";
   if ($themeHlLastTo) $themeHlLastTo.value = "#00ff78";
   if ($themeHlCheck) $themeHlCheck.value = "#ff0000";
-
-  if ($themeDotMove) $themeDotMove.value = "#000000";
-
-  if ($themeCoordLight) $themeCoordLight.value = "#000000";
-  if ($themeCoordDark) $themeCoordDark.value = "#ffffff";
 }
 
 /**
@@ -1374,10 +1354,7 @@ function initThemeControls() {
     !$themeHlSelected ||
     !$themeHlLastFrom ||
     !$themeHlLastTo ||
-    !$themeHlCheck ||
-    !$themeDotMove ||
-    !$themeCoordLight ||
-    !$themeCoordDark
+    !$themeHlCheck
   ) {
     return;
   }
@@ -1390,9 +1367,6 @@ function initThemeControls() {
     $themeHlLastFrom,
     $themeHlLastTo,
     $themeHlCheck,
-    $themeDotMove,
-    $themeCoordLight,
-    $themeCoordDark,
   ];
 
   handlers.forEach(el => {
