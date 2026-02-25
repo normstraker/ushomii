@@ -41,7 +41,7 @@
             <div class="card-title">Opponent Strength</div>
 
             <label class="label-row" for="elo">
-              <span>ELO</span>
+              <span>ELO - change anytime during game</span>
               <span class="value" id="eloValue">1200</span>
             </label>
 
@@ -53,6 +53,7 @@
               step="50"
               value="1200"
             />
+
             <label class="label-row" for="blunder">
               <span>Blunder</span>
               <span class="value" id="blunderValue">0</span>
@@ -80,19 +81,15 @@
 
             <div class="row">
               <label class="check">
-                <input id="showMoveSquares" type="checkbox" checked />
-                <span>Show legal move squares</span>
-              </label>
-            </div>
-
-            <div class="row">
-              <label class="check">
                 <input id="showMoveDots" type="checkbox" checked />
                 <span>Show legal move dots</span>
               </label>
             </div>
-            <div class="hint">
-              Change anytime. New strength applies on the engine’s next move.
+            <div class="row">
+              <label class="check">
+                <input id="showMoveSquares" type="checkbox" checked />
+                <span>Show legal move squares</span>
+              </label>
             </div>
 
             <div class="row">
@@ -120,6 +117,32 @@
             <div class="collapsible-body" id="themeBody">
               <div class="theme-body">
                 <div class="theme-grid">
+                  <!-- NEW: Piece set selector -->
+                  <div class="row">
+                    <label
+                      class="check"
+                      style="justify-content: space-between; width: 100%"
+                    >
+                      <span>Piece set</span>
+                      <select id="pieceSet">
+                        <option value="wikipedia">Wikipedia (default)</option>
+                        <option value="alpha">Alpha</option>
+                        <option value="uscf">USCF</option>
+                        <option value="merida">Merida</option>
+                        <option value="cburnett">Cburnett</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <!-- NEW: Light/Dark UI toggle -->
+                  <div class="row">
+                    <label class="check">
+                      <input id="uiTheme" type="checkbox" checked />
+                      <span>Dark UI</span>
+                    </label>
+                  </div>
+                  <div class="theme-divider"></div>
+
                   <label class="theme-row">
                     <span>Light squares</span>
                     <input id="themeSqLight" type="color" value="#f0d9b5" />

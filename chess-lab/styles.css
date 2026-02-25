@@ -34,6 +34,10 @@
   --hl-check-glow: rgba(255, 0, 0, 0.35);
 
   --panel-scroll-height: 220px;
+
+  /* Move dot colors */
+  --dot-move: rgba(0, 0, 0, 0.35);
+  --dot-capture: rgba(0, 0, 0, 0.45);
 }
 
 /* =========================================================
@@ -530,6 +534,52 @@ button:hover {
   align-items: center;
   color: var(--muted);
   font-size: 13px;
+}
+
+select {
+  background-color: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.theme-row .check {
+  justify-content: flex-end;
+}
+.theme-row select {
+  min-width: 160px;
+}
+
+/* Fix native dropdown text visibility */
+select {
+  background-color: var(--card);
+  color: var(--text);
+}
+
+/* =========================================================
+   [SECTION: UI Light/Dark Toggle]
+   ========================================================= */
+
+html[data-ui="light"] {
+  --bg: #f6f7fb;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #4b5563;
+  --border: #d1d5db;
+}
+
+/* Dark UI dropdown options */
+html[data-ui="dark"] select option {
+  background-color: #1f2937;
+  color: #ffffff;
+}
+
+/* Light UI dropdown options */
+html[data-ui="light"] select option {
+  background-color: #ffffff;
+  color: #111111;
 }
 
 /* =========================================================

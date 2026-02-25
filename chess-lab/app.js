@@ -55,6 +55,8 @@ const $themeHlLastFrom = document.getElementById("themeHlLastFrom");
 const $themeHlLastTo = document.getElementById("themeHlLastTo");
 const $themeHlCheck = document.getElementById("themeHlCheck");
 const $themeReset = document.getElementById("themeReset");
+const $pieceSet = document.getElementById("pieceSet");
+const $uiTheme = document.getElementById("uiTheme");
 
 /* ============================================================================
    ===== PERSISTENCE (FEN) ====================================================
@@ -92,6 +94,8 @@ function saveSettingsToStorage() {
       clickToMove: $clickToMove?.checked ?? false,
       showMoveSquares: $showMoveSquares?.checked ?? true,
       showMoveDots: $showMoveDots?.checked ?? true,
+      uiMode: document.documentElement.getAttribute("data-ui") || "dark",
+      pieceSet: $pieceSet?.value || currentPieceSet || "wikipedia",
 
       // Chessboard.js orientation: "white" | "black"
       orientation: board?.orientation?.() ?? initialOrientation,
@@ -118,9 +122,18 @@ function applySettings(settings) {
     if ($clickToMove) $clickToMove.checked = !!settings.clickToMove;
     if ($showMoveSquares) $showMoveSquares.checked = !!settings.showMoveSquares;
     if ($showMoveDots) $showMoveDots.checked = !!settings.showMoveDots;
+    if (settings.uiMode) applyUiMode(settings.uiMode);
+    if (settings.pieceSet && PIECE_SET_MAP[settings.pieceSet]) {
+      currentPieceSet = settings.pieceSet;
+      if ($pieceSet) $pieceSet.value = settings.pieceSet;
+    }
 
     if (settings.orientation === "black" || settings.orientation === "white") {
       initialOrientation = settings.orientation;
+    }
+    if (settings.pieceSet && PIECE_SET_MAP[settings.pieceSet]) {
+      currentPieceSet = settings.pieceSet;
+      if ($pieceSet) $pieceSet.value = settings.pieceSet;
     }
     return;
   }
@@ -513,6 +526,39 @@ function highlightCheck() {
       }
     }
   }
+}
+
+function applyUiMode(mode) {
+  const m = mode === "light" ? "light" : "dark";
+  document.documentElement.setAttribute("data-ui", m);
+
+  if ($uiTheme) {
+    $uiTheme.checked = m === "dark";
+  }
+}
+
+const PIECE_SET_MAP = {
+  wikipedia: "./vendor/chessboardjs/img/chesspieces/wikipedia/{piece}.png",
+  alpha: "./vendor/chessboardjs/img/chesspieces/alpha/{piece}.png",
+  uscf: "./vendor/chessboardjs/img/chesspieces/uscf/{piece}.png",
+  merida: "./vendor/chessboardjs/img/chesspieces/merida/{piece}.png",
+  cburnett: "./vendor/chessboardjs/img/chesspieces/cburnett/{piece}.png",
+};
+
+// const PIECE_SET_MAP = {
+//   wikipedia:
+//     "https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/img/chesspieces/wikipedia/{piece}.png",
+
+//   alpha:
+//     "https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/img/chesspieces/alpha/{piece}.png",
+
+//   uscf: "https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/img/chesspieces/uscf/{piece}.png",
+// };
+
+let currentPieceSet = "wikipedia";
+
+function getPieceThemePath() {
+  return PIECE_SET_MAP[currentPieceSet] || PIECE_SET_MAP.wikipedia;
 }
 
 /* ============================================================================
@@ -1000,19 +1046,14 @@ $playWhite.addEventListener("change", () => {
 
 $newGame.addEventListener("click", () => startNewGame());
 
-$showMoveSquares?.addEventListener("change", () => {
-  clearHighlights();
-  if (selectedSquare) highlightMovesFrom(selectedSquare);
-});
-
-$showMoveDots?.addEventListener("change", () => {
-  clearHighlights();
-  if (selectedSquare) highlightMovesFrom(selectedSquare);
-});
-
 $clickToMove?.addEventListener("change", () => {
   saveSettingsToStorage();
   syncDraggableMode();
+});
+
+$uiTheme?.addEventListener("change", () => {
+  applyUiMode($uiTheme.checked ? "dark" : "light");
+  saveSettingsToStorage();
 });
 
 $showMoveSquares?.addEventListener("change", () => {
@@ -1059,6 +1100,15 @@ $undo.addEventListener("click", () => {
 $flip.addEventListener("click", () => {
   board.flip();
   saveSettingsToStorage();
+});
+
+$pieceSet?.addEventListener("change", () => {
+  const v = $pieceSet.value;
+  if (!PIECE_SET_MAP[v]) return;
+
+  currentPieceSet = v;
+  saveSettingsToStorage();
+  rebuildBoardWithNewPieceSet();
 });
 
 /* ============================================================================
@@ -1131,11 +1181,32 @@ function initBoard() {
     position: initialPosition,
     orientation: initialOrientation, // ✅ restore flip state
     draggable: true,
-    pieceTheme: "./vendor/chessboardjs/img/chesspieces/wikipedia/{piece}.png",
+    pieceTheme: getPieceThemePath(),
     onDragStart,
     onDrop,
     onSnapEnd,
   });
+
+  function rebuildBoardWithNewPieceSet() {
+    if (!board) return;
+
+    const fen = game.fen();
+    const orientation = board.orientation();
+
+    board.destroy();
+
+    board = Chessboard("board", {
+      position: fen,
+      orientation,
+      draggable: !$clickToMove?.checked,
+      pieceTheme: getPieceThemePath(),
+      onDragStart,
+      onDrop,
+      onSnapEnd,
+    });
+
+    syncDraggableMode();
+  }
 
   syncDraggableMode();
 
