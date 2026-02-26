@@ -96,8 +96,6 @@ function saveSettingsToStorage() {
       showMoveDots: $showMoveDots?.checked ?? true,
       uiMode: document.documentElement.getAttribute("data-ui") || "dark",
       pieceSet: $pieceSet?.value || currentPieceSet || "wikipedia",
-
-      // Chessboard.js orientation: "white" | "black"
       orientation: board?.orientation?.() ?? initialOrientation,
     };
 
@@ -131,10 +129,6 @@ function applySettings(settings) {
     if (settings.orientation === "black" || settings.orientation === "white") {
       initialOrientation = settings.orientation;
     }
-    if (settings.pieceSet && PIECE_SET_MAP[settings.pieceSet]) {
-      currentPieceSet = settings.pieceSet;
-      if ($pieceSet) $pieceSet.value = settings.pieceSet;
-    }
     return;
   }
 
@@ -142,6 +136,10 @@ function applySettings(settings) {
   if ($clickToMove && isTouchDevice()) {
     $clickToMove.checked = true;
   }
+  // Optional: default UI + piece set
+  applyUiMode("dark");
+  currentPieceSet = "wikipedia";
+  if ($pieceSet) $pieceSet.value = "wikipedia";
 }
 
 /* ============================================================================
@@ -541,8 +539,8 @@ const PIECE_SET_MAP = {
   wikipedia: "./vendor/chessboardjs/img/chesspieces/wikipedia/{piece}.png",
   alpha: "./vendor/chessboardjs/img/chesspieces/alpha/{piece}.png",
   uscf: "./vendor/chessboardjs/img/chesspieces/uscf/{piece}.png",
-  merida: "./vendor/chessboardjs/img/chesspieces/merida/{piece}.png",
-  cburnett: "./vendor/chessboardjs/img/chesspieces/cburnett/{piece}.png",
+  merida: "./vendor/chessboardjs/img/chesspieces/merida/{piece}.svg",
+  cburnett: "./vendor/chessboardjs/img/chesspieces/cburnett/{piece}.svg",
 };
 
 // const PIECE_SET_MAP = {
@@ -1103,12 +1101,11 @@ $flip.addEventListener("click", () => {
 });
 
 $pieceSet?.addEventListener("change", () => {
-  const v = $pieceSet.value;
-  if (!PIECE_SET_MAP[v]) return;
-
-  currentPieceSet = v;
+  const set = $pieceSet.value;
+  if (!PIECE_SET_MAP[set]) return;
+  currentPieceSet = set;
+  rebuildBoardWithPieceTheme(getPieceThemePath());
   saveSettingsToStorage();
-  rebuildBoardWithNewPieceSet();
 });
 
 /* ============================================================================
@@ -1172,6 +1169,32 @@ function syncDraggableMode() {
   if (board.cfg) board.cfg.draggable = wantDrag;
 }
 
+function rebuildBoardWithPieceTheme(pieceThemePath) {
+  if (!board) return;
+  const fen = game.fen();
+  const orient = board.orientation?.() ?? initialOrientation;
+  if (typeof board.destroy === "function") {
+    board.destroy();
+  } else {
+    document.getElementById("board").innerHTML = "";
+  }
+
+  board = Chessboard("board", {
+    position: fen,
+    orientation: orient,
+    draggable: !$clickToMove?.checked,
+    pieceTheme: pieceThemePath,
+    onDragStart,
+    onDrop,
+    onSnapEnd,
+  });
+
+  syncDraggableMode();
+  afterLayoutChange();
+
+  // Repaint highlights if a piece was selected
+  if (selectedSquare) highlightMovesFrom(selectedSquare);
+}
 /* ============================================================================
    ===== BOARD INIT + CLICK-TO-MOVE ==========================================
    ============================================================================ */
