@@ -21,6 +21,8 @@ let initialOrientation = "white";
 // Click-to-move selection
 let selectedSquare = null;
 
+let analysisMode = false;
+
 // Stockfish / engine UI indicator
 let $engineInline = null;
 let thinkingDelayTimer = null;
@@ -57,6 +59,8 @@ const $themeHlCheck = document.getElementById("themeHlCheck");
 const $themeReset = document.getElementById("themeReset");
 const $pieceSet = document.getElementById("pieceSet");
 const $uiTheme = document.getElementById("uiTheme");
+const $analysisMode = document.getElementById("analysisMode");
+const $analysisLine = document.getElementById("analysisLine");
 
 /* ============================================================================
    ===== PERSISTENCE (FEN) ====================================================
@@ -94,6 +98,7 @@ function saveSettingsToStorage() {
       clickToMove: $clickToMove?.checked ?? false,
       showMoveSquares: $showMoveSquares?.checked ?? true,
       showMoveDots: $showMoveDots?.checked ?? true,
+      analysisMode: $analysisMode?.checked ?? false,
       uiMode: document.documentElement.getAttribute("data-ui") || "dark",
       pieceSet: $pieceSet?.value || currentPieceSet || "wikipedia",
       orientation: board?.orientation?.() ?? initialOrientation,
@@ -125,10 +130,13 @@ function applySettings(settings) {
       currentPieceSet = settings.pieceSet;
       if ($pieceSet) $pieceSet.value = settings.pieceSet;
     }
-
+    if ($analysisMode) $analysisMode.checked = !!settings.analysisMode;
+    analysisMode = !!settings.analysisMode;
+    syncAnalysisUi();
     if (settings.orientation === "black" || settings.orientation === "white") {
       initialOrientation = settings.orientation;
     }
+
     return;
   }
 
@@ -136,6 +144,8 @@ function applySettings(settings) {
   if ($clickToMove && isTouchDevice()) {
     $clickToMove.checked = true;
   }
+  analysisMode = false;
+  syncAnalysisUi();
   // Optional: default UI + piece set
   applyUiMode("dark");
   currentPieceSet = "wikipedia";
@@ -300,16 +310,16 @@ function clearEngineReplyTimer() {
 
 // Delay that feels human (and not twitchy)
 function computeHumanDelayMs() {
+  if (analysisMode) return 0;
+
   const elo = Number($elo.value);
   const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
 
-  // Bigger + more natural:
-  // low elo: ~900–1500ms
-  // high elo: ~1400–2600ms
   return Math.round(900 + t * 900 + Math.random() * (600 + t * 200));
 }
 
 function scheduleEngineReplyAfterSnap() {
+  if (analysisMode) return;
   clearEngineReplyTimer();
 
   const delay = computeHumanDelayMs();
@@ -321,6 +331,38 @@ function scheduleEngineReplyAfterSnap() {
       maybeEnginePlays();
     }
   }, delay);
+}
+
+async function requestAnalysisNow() {
+  if (!analysisMode) return;
+  if (!sf) return;
+  if (engineBusy) return;
+  if (game.isGameOver()) return;
+
+  const fenAtRequest = game.fen();
+
+  // Analysis params: deeper + stable
+  const candidates = await getEngineCandidates({
+    movetimeMs: 250,
+    multiPV: 1,
+    targetDepth: 12,
+  });
+
+  // Ignore if position changed while thinking
+  if (game.fen() !== fenAtRequest) return;
+
+  const best = candidates?.[0];
+  if (!best || !$analysisLine) return;
+
+  // Display: best move + score
+  const score =
+    best.scoreMate !== null
+      ? `mate ${best.scoreMate}`
+      : best.scoreCp !== null
+        ? `${best.scoreCp} cp`
+        : `—`;
+
+  $analysisLine.textContent = `Best: ${best.moveUci}  |  ${score}`;
 }
 
 /* ============================================================================
@@ -363,6 +405,21 @@ function clearDebug() {
 function syncEloUI() {
   if (!$elo || !$eloValue) return;
   $eloValue.textContent = $elo.value;
+}
+
+function syncAnalysisUi() {
+  if (!$analysisLine) return;
+  $analysisLine.style.display = analysisMode ? "block" : "none";
+  if (!analysisMode) $analysisLine.textContent = "—";
+}
+
+function setAnalysisMode(on) {
+  analysisMode = !!on;
+  if ($analysisMode) $analysisMode.checked = analysisMode;
+  syncAnalysisUi();
+
+  // When switching ON, analyze immediately
+  if (analysisMode) requestAnalysisNow();
 }
 
 function loadSavedElo() {
@@ -959,6 +1016,7 @@ async function maybeEnginePlays() {
 
     // Persist after engine move
     saveFenToStorage();
+    requestAnalysisNow();
   }
 }
 
@@ -996,6 +1054,7 @@ function onDrop(source, target) {
 
   // Persist after human drag move
   saveFenToStorage();
+  requestAnalysisNow();
 
   clearHighlights();
   selectedSquare = null;
@@ -1006,10 +1065,13 @@ function onDrop(source, target) {
 
 function onSnapEnd() {
   board.position(game.fen());
-
-  // Now that the human move has visually finished, start the engine delay clock
   if (engineReplyRequested) {
-    scheduleEngineReplyAfterSnap();
+    if (!analysisMode) {
+      scheduleEngineReplyAfterSnap();
+    } else {
+      engineReplyRequested = false; // analysis mode: don't auto-play
+      requestAnalysisNow(); // but do analyze
+    }
   }
 }
 
@@ -1075,6 +1137,11 @@ $blunder?.addEventListener("change", () => {
   saveBlunder();
 });
 
+$analysisMode?.addEventListener("change", () => {
+  setAnalysisMode($analysisMode.checked);
+  saveSettingsToStorage();
+});
+
 // ===== UNDO CONTROL =====
 $undo.addEventListener("click", () => {
   if (game.history().length === 0) return;
@@ -1093,6 +1160,7 @@ $undo.addEventListener("click", () => {
 
   // Persist after undo
   saveFenToStorage();
+  requestAnalysisNow();
 });
 
 $flip.addEventListener("click", () => {
@@ -1152,6 +1220,10 @@ function startNewGame() {
   const delay = Math.round(350 + t * 700 + Math.random() * 400);
 
   setTimeout(() => {
+    if (analysisMode) {
+      requestAnalysisNow();
+      return;
+    }
     if (!game.isGameOver() && !isHumansTurn()) {
       maybeEnginePlays();
     }
@@ -1287,6 +1359,7 @@ function initBoard() {
 
     // Persist after click-to-move
     saveFenToStorage();
+    requestAnalysisNow();
 
     clearHighlights();
     selectedSquare = null;
@@ -1294,9 +1367,15 @@ function initBoard() {
     engineReplyRequested = true;
     clearEngineReplyTimer();
 
-    // Give the browser a tick to paint the human move, then start the “human” delay
     setTimeout(() => {
-      if (engineReplyRequested) scheduleEngineReplyAfterSnap();
+      if (!engineReplyRequested) return;
+
+      if (!analysisMode) {
+        scheduleEngineReplyAfterSnap();
+      } else {
+        engineReplyRequested = false;
+        requestAnalysisNow();
+      }
     }, 50);
   });
 
@@ -1339,6 +1418,14 @@ const handleWindowResize = debounce(() => {
 }, 120);
 
 window.addEventListener("resize", handleWindowResize);
+
+window.addEventListener("orientationchange", () => {
+  // Let mobile finish reflowing first
+  setTimeout(() => {
+    enforceMobileMovesRule();
+    afterLayoutChange();
+  }, 200);
+});
 
 function setMovesOpen(isOpen, { persist = true } = {}) {
   if (!$movesCard) return;
@@ -1592,5 +1679,11 @@ function isTouchDevice() {
   // Ensure we save at least once on fresh loads
   saveFenToStorage();
 
-  setTimeout(maybeEnginePlays, 0);
+  setTimeout(() => {
+    if (analysisMode) {
+      requestAnalysisNow();
+    } else {
+      maybeEnginePlays();
+    }
+  }, 0);
 })();

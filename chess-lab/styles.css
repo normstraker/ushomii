@@ -41,9 +41,11 @@
 * {
   box-sizing: border-box;
 }
+
 html,
 body {
-  height: 100%;
+  height: auto;
+  min-height: 100%;
 }
 
 body {
@@ -57,10 +59,16 @@ body {
     sans-serif;
   background: var(--bg);
   color: var(--text);
-  overflow: hidden; /* prevent the whole page from scrolling */
+
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .page {
+  height: 100dvh; /* NEW: lock layout to viewport on desktop */
+  overflow: hidden; /* NEW: prevent page scrolling on desktop */
+
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
@@ -104,18 +112,25 @@ body {
 .board-wrap {
   display: grid;
   gap: 12px;
+  min-width: 0;
 }
 
 .board {
-  width: min(82vw, 720px);
+  /* Height budget for the board area (tweak this number if needed) */
+  --board-max: calc(100dvh - 260px);
+
+  /* Key idea: fill available column width, but never exceed height budget */
+  width: min(100%, var(--board-max));
   aspect-ratio: 1 / 1;
 
-  /* Prevent board from being taller than viewport */
-  max-height: calc(100dvh - 180px);
+  /* safety */
+  max-width: 100%;
+}
 
-  border-radius: var(--radius);
-  overflow: hidden;
-  border: 1px solid var(--border);
+  aspect-ratio: 1 / 1;
+
+  /* Also protect for short windows */
+  max-height: calc(100dvh - 260px);
 }
 
 #board {
@@ -271,12 +286,6 @@ body {
   animation: spin 0.8s linear infinite;
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
 /* =========================================================
    [SECTION: Right Panel Layout + Cards]
    ========================================================= */
@@ -284,10 +293,9 @@ body {
   display: grid;
   gap: 12px;
   grid-template-rows: 1fr;
-
+  min-width: 0;
   height: 100%;
   min-height: 0; /* CRITICAL */
-
   overflow: hidden; /* contain internal scrolls */
   overscroll-behavior: contain;
 }
@@ -790,9 +798,13 @@ html[data-ui="light"] select option {
   .content {
     grid-template-columns: 1fr;
   }
+
+  /* Board width is limited by BOTH screen width and available height */
   .board {
-    width: min(92vw, 720px);
-  }
+  --board-max: calc(100dvh - 260px);
+  width: min(100%, var(--board-max));
+  aspect-ratio: 1 / 1;
+}
 
   /* Slightly bigger tap targets on mobile */
   button {
@@ -808,12 +820,6 @@ html[data-ui="light"] select option {
     width: 18px;
     height: 18px;
   }
-
-  /* Keep board big on mobile */
-  .board {
-    width: min(96vw, 720px);
-    max-height: calc(100dvh - 220px);
-  }
 }
 
 /* =========================================================
@@ -826,8 +832,9 @@ html[data-ui="light"] select option {
   }
 
   .page {
-    height: auto; /* stop forcing a fixed viewport height */
+    height: auto;
     min-height: 100dvh;
+    overflow: visible; /* NEW */
   }
 
   .content {
@@ -845,5 +852,41 @@ html[data-ui="light"] select option {
   #themeBody .theme-body {
     max-height: none;
     overflow: visible;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) {
+  /* Put panel to the right again */
+  .content {
+    grid-template-columns: 1fr 320px;
+    align-items: start;
+  }
+
+  /* Lock to viewport in landscape so it feels "app-like" */
+  .page {
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  /* Board fits the landscape height */
+  .board {
+  --board-max: calc(100dvh - 120px);
+  width: min(100%, var(--board-max));
+  aspect-ratio: 1 / 1;
+}
+
+  /* Panel scrolls inside the viewport */
+  .panel {
+    max-height: calc(100dvh - 40px);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Let your collapsible bodies scroll again in landscape */
+  #movesBody,
+  #debugBody,
+  #themeBody .theme-body {
+    max-height: 45dvh;
+    overflow: auto;
   }
 }
