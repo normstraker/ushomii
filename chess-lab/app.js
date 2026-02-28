@@ -136,7 +136,6 @@ function applySettings(settings) {
     if (settings.orientation === "black" || settings.orientation === "white") {
       initialOrientation = settings.orientation;
     }
-
     return;
   }
 
@@ -146,7 +145,6 @@ function applySettings(settings) {
   }
   analysisMode = false;
   syncAnalysisUi();
-  // Optional: default UI + piece set
   applyUiMode("dark");
   currentPieceSet = "wikipedia";
   if ($pieceSet) $pieceSet.value = "wikipedia";
@@ -159,10 +157,6 @@ function applySettings(settings) {
 
 const STORAGE_THEME = "chesslab_theme_v1";
 
-/**
- * remark: Convert #rrggbb (or #rgb) to rgba(r,g,b,a)
- * We use this for highlights/dots where your CSS expects an alpha.
- */
 function hexToRgba(hex, alpha = 1) {
   if (!hex) return `rgba(0,0,0,${alpha})`;
 
@@ -178,7 +172,6 @@ function hexToRgba(hex, alpha = 1) {
   const g = parseInt(h.slice(3, 5), 16);
   const b = parseInt(h.slice(5, 7), 16);
 
-  // Fallback if parse fails
   if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) {
     return `rgba(0,0,0,${alpha})`;
   }
@@ -186,10 +179,6 @@ function hexToRgba(hex, alpha = 1) {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
-/**
- * remark: Single place to set any theme variable.
- * This updates the page instantly.
- */
 function setThemeVar(name, value) {
   try {
     document.documentElement.style.setProperty(name, value);
@@ -197,18 +186,12 @@ function setThemeVar(name, value) {
 }
 
 function getDefaultTheme() {
-  // remark: These defaults should match your CSS :root defaults.
-  // We'll keep them here so Reset is deterministic.
   return {
     "--sq-light": "#f0d9b5",
     "--sq-dark": "#b58863",
-
-    // Highlights (your CSS uses these as box-shadow colors)
     "--hl-selected": hexToRgba("#ffd700", 0.55),
     "--hl-last-from": hexToRgba("#00ff78", 0.55),
     "--hl-last-to": hexToRgba("#00ff78", 0.35),
-
-    // Check pulse vars (used inside keyframes too)
     "--hl-check": hexToRgba("#ff0000", 0.75),
     "--hl-check-soft": hexToRgba("#ff0000", 0.55),
     "--hl-check-strong": hexToRgba("#ff0000", 0.85),
@@ -232,29 +215,18 @@ function loadThemeFromStorage() {
   }
 }
 
-/**
- * remark: Apply a theme object of CSS vars -> values.
- */
 function applyTheme(themeObj) {
   if (!themeObj) return;
-  for (const [k, v] of Object.entries(themeObj)) {
-    setThemeVar(k, v);
-  }
+  for (const [k, v] of Object.entries(themeObj)) setThemeVar(k, v);
 }
 
-/**
- * remark: Read current control values and build a theme object that matches our CSS vars.
- * This is what we save.
- */
 function buildThemeFromInputs() {
   return {
     "--sq-light": $themeSqLight?.value ?? "#f0d9b5",
     "--sq-dark": $themeSqDark?.value ?? "#b58863",
-
     "--hl-selected": hexToRgba($themeHlSelected?.value ?? "#ffd700", 0.55),
     "--hl-last-from": hexToRgba($themeHlLastFrom?.value ?? "#00ff78", 0.55),
     "--hl-last-to": hexToRgba($themeHlLastTo?.value ?? "#00ff78", 0.35),
-
     "--hl-check": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.75),
     "--hl-check-soft": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.55),
     "--hl-check-strong": hexToRgba($themeHlCheck?.value ?? "#ff0000", 0.85),
@@ -262,30 +234,25 @@ function buildThemeFromInputs() {
   };
 }
 
-/**
- * remark: Keep inputs in sync with whatever theme is currently applied.
- * Since some vars store rgba(...) and inputs want hex, we use the inputs as the "source of truth"
- * during sessions — and on load we set inputs to defaults first, then override from saved theme.
- */
 function setInputsToDefaults() {
   if ($themeSqLight) $themeSqLight.value = "#f0d9b5";
   if ($themeSqDark) $themeSqDark.value = "#b58863";
-
   if ($themeHlSelected) $themeHlSelected.value = "#ffd700";
   if ($themeHlLastFrom) $themeHlLastFrom.value = "#00ff78";
   if ($themeHlLastTo) $themeHlLastTo.value = "#00ff78";
   if ($themeHlCheck) $themeHlCheck.value = "#ff0000";
 }
 
-/**
- * remark: Apply from inputs (live) + save.
- */
+function afterLayoutChange() {
+  requestAnimationFrame(() => {
+    if (board && typeof board.resize === "function") board.resize();
+  });
+}
+
 function applyAndSaveThemeFromInputs() {
   const themeObj = buildThemeFromInputs();
   applyTheme(themeObj);
   saveThemeToStorage(themeObj);
-
-  // remark: Changing square sizes/colors can affect board render a tiny bit; safe resize.
   afterLayoutChange();
 }
 
@@ -308,18 +275,15 @@ function clearEngineReplyTimer() {
   }
 }
 
-// Delay that feels human (and not twitchy)
 function computeHumanDelayMs() {
   if (analysisMode) return 0;
 
   const elo = Number($elo.value);
   const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
-
   return Math.round(900 + t * 900 + Math.random() * (600 + t * 200));
 }
 
 function scheduleEngineReplyAfterSnap() {
-  if (analysisMode) return;
   clearEngineReplyTimer();
 
   const delay = computeHumanDelayMs();
@@ -341,20 +305,17 @@ async function requestAnalysisNow() {
 
   const fenAtRequest = game.fen();
 
-  // Analysis params: deeper + stable
   const candidates = await getEngineCandidates({
     movetimeMs: 250,
     multiPV: 1,
     targetDepth: 12,
   });
 
-  // Ignore if position changed while thinking
   if (game.fen() !== fenAtRequest) return;
 
   const best = candidates?.[0];
   if (!best || !$analysisLine) return;
 
-  // Display: best move + score
   const score =
     best.scoreMate !== null
       ? `mate ${best.scoreMate}`
@@ -418,7 +379,7 @@ function setAnalysisMode(on) {
   if ($analysisMode) $analysisMode.checked = analysisMode;
   syncAnalysisUi();
 
-  // When switching ON, analyze immediately
+  // When switching ON, analyze immediately (current position)
   if (analysisMode) requestAnalysisNow();
 }
 
@@ -547,7 +508,6 @@ function isHumanPieceOn(square) {
   return piece.color === humanColor;
 }
 
-// Last move highlight
 function clearLastMoveHighlight() {
   $("#board .square-55d63").removeClass("square-last-from square-last-to");
 }
@@ -557,7 +517,6 @@ function highlightLastMove(from, to) {
   $(`#board .square-55d63[data-square="${to}"]`).addClass("square-last-to");
 }
 
-// Check / checkmate highlight
 function clearCheckHighlight() {
   $("#board .square-55d63").removeClass("square-check square-checkmate");
 }
@@ -583,13 +542,15 @@ function highlightCheck() {
   }
 }
 
+/* ============================================================================
+   ===== UI MODE + PIECES =====================================================
+   ============================================================================ */
+
 function applyUiMode(mode) {
   const m = mode === "light" ? "light" : "dark";
   document.documentElement.setAttribute("data-ui", m);
 
-  if ($uiTheme) {
-    $uiTheme.checked = m === "dark";
-  }
+  if ($uiTheme) $uiTheme.checked = m === "dark";
 }
 
 const PIECE_SET_MAP = {
@@ -599,16 +560,6 @@ const PIECE_SET_MAP = {
   merida: "./vendor/chessboardjs/img/chesspieces/merida/{piece}.svg",
   cburnett: "./vendor/chessboardjs/img/chesspieces/cburnett/{piece}.svg",
 };
-
-// const PIECE_SET_MAP = {
-//   wikipedia:
-//     "https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/img/chesspieces/wikipedia/{piece}.png",
-
-//   alpha:
-//     "https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/img/chesspieces/alpha/{piece}.png",
-
-//   uscf: "https://cdnjs.cloudflare.com/ajax/libs/chessboard.js/1.0.0/img/chesspieces/uscf/{piece}.png",
-// };
 
 let currentPieceSet = "wikipedia";
 
@@ -643,7 +594,6 @@ function waitForReady() {
   });
 }
 
-// Parses lines like:
 // info depth 15 multipv 2 score cp 12 pv e2e4 e7e5 ...
 function parseInfoLine(line) {
   if (!line.includes(" pv ")) return null;
@@ -692,7 +642,6 @@ function initStockfish() {
     if (!line.startsWith("bestmove") && !line.startsWith("info"))
       logDebug(line);
 
-    // MultiPV info lines
     if (line.startsWith("info")) {
       const parsed = parseInfoLine(line);
       if (parsed && pendingAnalysisResolver) {
@@ -733,11 +682,9 @@ function initStockfish() {
       const parts = line.split(/\s+/);
       const best = parts[1];
 
-      // Engine is done
       engineBusy = false;
       setEngineThinking(false);
 
-      // If we were collecting MultiPV but didn't hit threshold, resolve partial
       if (pendingAnalysisResolver) {
         const resolveAnalysis = pendingAnalysisResolver;
         pendingAnalysisResolver = null;
@@ -763,7 +710,6 @@ function initStockfish() {
         return;
       }
 
-      // Classic bestmove path
       if (pendingBestMoveResolver) {
         const resolve = pendingBestMoveResolver;
         pendingBestMoveResolver = null;
@@ -774,11 +720,9 @@ function initStockfish() {
 
   engineReady = false;
 
-  // Start UCI
   sf.postMessage("uci");
   sf.postMessage("isready");
 
-  // Apply slider after boot
   applyEloToEngine(Number($elo.value));
 }
 
@@ -791,7 +735,6 @@ function applyEloToEngine(elo) {
     0,
     Math.min(20, Math.round(((elo - 400) / (2500 - 400)) * 20)),
   );
-
   const slowMover = Math.max(
     10,
     Math.min(1000, Math.round(300 - (elo - 400) * 0.12)),
@@ -807,18 +750,14 @@ function applyEloToEngine(elo) {
   );
 }
 
-// ELO -> search params (makes slider feel real)
 function engineParamsForElo(elo) {
   const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
-
   const movetimeMs = Math.round(80 + (elo - 400) * 0.12);
   const targetDepth = Math.round(6 + t * 8); // ~6..14
   const multiPV = t < 0.35 ? 3 : 5;
-
   return { movetimeMs, targetDepth, multiPV };
 }
 
-// Get top N candidate moves (MultiPV). Uses bestmove as fallback.
 function getEngineCandidates({
   movetimeMs = 200,
   multiPV = 5,
@@ -848,7 +787,6 @@ function getEngineCandidates({
 
     pendingAnalysisResolver = candidates => resolve(candidates);
 
-    // Fallback if we never get enough info lines
     pendingBestMoveResolver = best => {
       if (!pendingAnalysisResolver) return;
 
@@ -906,7 +844,7 @@ function updateStatus() {
   }
 
   $status.textContent = status;
-  ensureEngineInline(); // re-attach after textContent wipe
+  ensureEngineInline();
   highlightCheck();
 }
 
@@ -927,29 +865,22 @@ function chooseHumanMove(candidates, elo) {
   const best = sorted[0];
   const bestCp = effectiveCp(best);
 
-  // ELO -> blunder behavior
   const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
-  // Base behavior from ELO
   let blunderChance = (1 - t) * 0.28;
   let maxDrop = 500 - t * 450;
 
-  // Blunder slider tweak (-100..+100), center=0
   const b = Number($blunder?.value ?? 0); // -100..100
-  const u = Math.max(-1, Math.min(1, b / 100)); // -1..1
+  const u = Math.max(-1, Math.min(1, b / 100));
 
-  // Left (u<0): more blunders + bigger drops
-  // Right (u>0): fewer blunders + smaller drops
-  const chanceMult = u < 0 ? 1 + -u * 1.25 : 1 - u * 0.75; // up to +125% / down to -75%
-  const dropMult = u < 0 ? 1 + -u * 0.9 : 1 - u * 0.6; // up to +90% / down to -60%
+  const chanceMult = u < 0 ? 1 + -u * 1.25 : 1 - u * 0.75;
+  const dropMult = u < 0 ? 1 + -u * 0.9 : 1 - u * 0.6;
 
   blunderChance *= chanceMult;
   maxDrop *= dropMult;
 
-  // Clamp to sane bounds
   blunderChance = Math.max(0, Math.min(0.9, blunderChance));
   maxDrop = Math.max(30, Math.min(900, maxDrop));
 
-  // Slightly fewer blunders when position is "easy"
   const situational = Math.max(0.4, Math.min(1.0, 1 - (bestCp / 800) * 0.25));
   const finalBlunderChance = blunderChance * situational;
 
@@ -964,7 +895,7 @@ function chooseHumanMove(candidates, elo) {
     return 1 / (1 + drop / 50);
   });
 
-  const sum = weights.reduce((a, b) => a + b, 0);
+  const sum = weights.reduce((a, b2) => a + b2, 0);
   let r = Math.random() * sum;
   for (let i = 0; i < allowed.length; i++) {
     r -= weights[i];
@@ -993,7 +924,6 @@ async function maybeEnginePlays() {
     targetDepth,
   });
 
-  // If game changed while engine was thinking, ignore result
   if (game.fen() !== fenAtRequest) return;
 
   const chosen = chooseHumanMove(candidates, elo);
@@ -1007,16 +937,16 @@ async function maybeEnginePlays() {
 
   const move = game.move({ from, to, promotion: promo || "q" });
   if (move) {
-    // Animate the piece sliding
     board.move(from + "-" + to);
 
     updateStatus();
     renderMoveList();
     highlightLastMove(from, to);
 
-    // Persist after engine move
     saveFenToStorage();
-    requestAnalysisNow();
+
+    // After engine moves, it's the human's turn -> safe to analyze
+    if (analysisMode) requestAnalysisNow();
   }
 }
 
@@ -1054,24 +984,21 @@ function onDrop(source, target) {
 
   // Persist after human drag move
   saveFenToStorage();
-  requestAnalysisNow();
 
   clearHighlights();
   selectedSquare = null;
 
-  // Request engine reply, but wait until snap animation finishes (onSnapEnd)
+  // IMPORTANT: do NOT analyze here (it would block engine move).
+  // We'll analyze after engine replies (when it's the human's turn).
   engineReplyRequested = true;
 }
 
 function onSnapEnd() {
   board.position(game.fen());
+
   if (engineReplyRequested) {
-    if (!analysisMode) {
-      scheduleEngineReplyAfterSnap();
-    } else {
-      engineReplyRequested = false; // analysis mode: don't auto-play
-      requestAnalysisNow(); // but do analyze
-    }
+    engineReplyRequested = false; // prevents double-fire
+    scheduleEngineReplyAfterSnap(); // analysisMode => instant (0ms)
   }
 }
 
@@ -1079,9 +1006,7 @@ function onSnapEnd() {
    ===== CONTROLS (ELO / NEW GAME / UNDO / FLIP / HIGHLIGHTS) =================
    ============================================================================ */
 
-$elo.addEventListener("input", () => {
-  syncEloUI();
-});
+$elo.addEventListener("input", () => syncEloUI());
 
 $elo.addEventListener("change", () => {
   syncEloUI();
@@ -1089,7 +1014,6 @@ $elo.addEventListener("change", () => {
 
   applyEloToEngine(Number($elo.value));
 
-  // If slider moved mid-think, stop engine and unlock UI
   if (engineBusy && sf) {
     sf.postMessage("stop");
     engineBusy = false;
@@ -1128,9 +1052,7 @@ $showMoveDots?.addEventListener("change", () => {
   saveSettingsToStorage();
 });
 
-$blunder?.addEventListener("input", () => {
-  syncBlunderUI();
-});
+$blunder?.addEventListener("input", () => syncBlunderUI());
 
 $blunder?.addEventListener("change", () => {
   syncBlunderUI();
@@ -1146,7 +1068,6 @@ $analysisMode?.addEventListener("change", () => {
 $undo.addEventListener("click", () => {
   if (game.history().length === 0) return;
 
-  // Cancel any scheduled engine reply
   engineReplyRequested = false;
   clearEngineReplyTimer();
 
@@ -1158,9 +1079,10 @@ $undo.addEventListener("click", () => {
   renderMoveList();
   clearLastMoveHighlight();
 
-  // Persist after undo
   saveFenToStorage();
-  requestAnalysisNow();
+
+  // After undo it's always human's turn in your logic -> safe to analyze
+  if (analysisMode) requestAnalysisNow();
 });
 
 $flip.addEventListener("click", () => {
@@ -1184,11 +1106,9 @@ function startNewGame() {
   game = new Chess();
   board.start(true);
 
-  // Clear saved game state and save fresh start
   clearFenFromStorage();
   saveFenToStorage();
 
-  // Cancel any scheduled engine reply
   engineReplyRequested = false;
   clearEngineReplyTimer();
 
@@ -1214,37 +1134,32 @@ function startNewGame() {
     sf.postMessage("isready");
   }
 
-  // --- Human-like engine delay ---
-  const elo = Number($elo.value);
-  const t = Math.max(0, Math.min(1, (elo - 400) / (2500 - 400)));
-  const delay = Math.round(350 + t * 700 + Math.random() * 400);
-
+  // If human chose Black, engine should open immediately (analysisMode => instant anyway)
   setTimeout(() => {
-    if (analysisMode) {
-      requestAnalysisNow();
-      return;
-    }
-    if (!game.isGameOver() && !isHumansTurn()) {
+    if (game.isGameOver()) return;
+
+    if (!isHumansTurn()) {
       maybeEnginePlays();
+    } else if (analysisMode) {
+      requestAnalysisNow();
     }
-  }, delay);
+  }, 0);
 }
 
 function syncDraggableMode() {
   if (!board) return;
 
   const wantDrag = !$clickToMove?.checked;
-  // chessboard.js supports changing draggable after init
   board.draggable = wantDrag;
-
-  // Also update the config if available (some builds expose it)
   if (board.cfg) board.cfg.draggable = wantDrag;
 }
 
 function rebuildBoardWithPieceTheme(pieceThemePath) {
   if (!board) return;
+
   const fen = game.fen();
   const orient = board.orientation?.() ?? initialOrientation;
+
   if (typeof board.destroy === "function") {
     board.destroy();
   } else {
@@ -1264,9 +1179,9 @@ function rebuildBoardWithPieceTheme(pieceThemePath) {
   syncDraggableMode();
   afterLayoutChange();
 
-  // Repaint highlights if a piece was selected
   if (selectedSquare) highlightMovesFrom(selectedSquare);
 }
+
 /* ============================================================================
    ===== BOARD INIT + CLICK-TO-MOVE ==========================================
    ============================================================================ */
@@ -1274,7 +1189,7 @@ function rebuildBoardWithPieceTheme(pieceThemePath) {
 function initBoard() {
   board = Chessboard("board", {
     position: initialPosition,
-    orientation: initialOrientation, // ✅ restore flip state
+    orientation: initialOrientation,
     draggable: true,
     pieceTheme: getPieceThemePath(),
     onDragStart,
@@ -1282,33 +1197,11 @@ function initBoard() {
     onSnapEnd,
   });
 
-  function rebuildBoardWithNewPieceSet() {
-    if (!board) return;
-
-    const fen = game.fen();
-    const orientation = board.orientation();
-
-    board.destroy();
-
-    board = Chessboard("board", {
-      position: fen,
-      orientation,
-      draggable: !$clickToMove?.checked,
-      pieceTheme: getPieceThemePath(),
-      onDragStart,
-      onDrop,
-      onSnapEnd,
-    });
-
-    syncDraggableMode();
-  }
-
   syncDraggableMode();
 
   const boardEl = document.getElementById("board");
   boardEl.onclick = null;
 
-  // Click-to-move (sticky pick up / put down)
   boardEl.addEventListener("click", e => {
     if (!$clickToMove?.checked) return;
     if (game.isGameOver()) return;
@@ -1322,7 +1215,7 @@ function initBoard() {
     const square = sqEl.getAttribute("data-square");
     if (!square) return;
 
-    // 1) Selecting a piece
+    // 1) Select a piece
     if (!selectedSquare) {
       if (!isHumanPieceOn(square)) return;
       selectedSquare = square;
@@ -1330,7 +1223,7 @@ function initBoard() {
       return;
     }
 
-    // 2) Clicking the same square cancels
+    // 2) Same square cancels
     if (square === selectedSquare) {
       clearHighlights();
       selectedSquare = null;
@@ -1357,9 +1250,7 @@ function initBoard() {
     renderMoveList();
     highlightLastMove(selectedSquare, square);
 
-    // Persist after click-to-move
     saveFenToStorage();
-    requestAnalysisNow();
 
     clearHighlights();
     selectedSquare = null;
@@ -1367,15 +1258,10 @@ function initBoard() {
     engineReplyRequested = true;
     clearEngineReplyTimer();
 
+    // Always schedule reply; analysisMode => 0ms delay
     setTimeout(() => {
       if (!engineReplyRequested) return;
-
-      if (!analysisMode) {
-        scheduleEngineReplyAfterSnap();
-      } else {
-        engineReplyRequested = false;
-        requestAnalysisNow();
-      }
+      scheduleEngineReplyAfterSnap();
     }, 50);
   });
 
@@ -1389,12 +1275,13 @@ function initBoard() {
   };
   document.addEventListener("click", window.__chesslabCancelClickToMove);
 }
+
 /* ============================================================================
    ===== RESPONSIVE UI (board resize + moves collapse) =========================
    ============================================================================ */
 
 const STORAGE_MOVES_OPEN = "chesslab_moves_open_v1";
-const MOBILE_BP = 900; // match your CSS breakpoint
+const MOBILE_BP = 900;
 
 function debounce(fn, wait = 120) {
   let t;
@@ -1404,15 +1291,23 @@ function debounce(fn, wait = 120) {
   };
 }
 
-function afterLayoutChange() {
-  // Let DOM reflow, then resize chessboard.js
-  requestAnimationFrame(() => {
-    if (board && typeof board.resize === "function") board.resize();
-  });
+let __boardResizeObserver = null;
+
+function initBoardResizeObserver() {
+  const boardWrap = document.querySelector(".board");
+  if (!boardWrap || typeof ResizeObserver === "undefined") return;
+
+  if (__boardResizeObserver) {
+    try {
+      __boardResizeObserver.disconnect();
+    } catch (_) {}
+  }
+
+  __boardResizeObserver = new ResizeObserver(() => afterLayoutChange());
+  __boardResizeObserver.observe(boardWrap);
 }
 
 const handleWindowResize = debounce(() => {
-  // Auto-collapse moves on mobile widths unless user explicitly opened it
   enforceMobileMovesRule();
   afterLayoutChange();
 }, 120);
@@ -1420,7 +1315,6 @@ const handleWindowResize = debounce(() => {
 window.addEventListener("resize", handleWindowResize);
 
 window.addEventListener("orientationchange", () => {
-  // Let mobile finish reflowing first
   setTimeout(() => {
     enforceMobileMovesRule();
     afterLayoutChange();
@@ -1445,16 +1339,13 @@ function setMovesOpen(isOpen, { persist = true } = {}) {
 function getSavedMovesOpen() {
   try {
     const raw = localStorage.getItem(STORAGE_MOVES_OPEN);
-    if (raw === null) return null; // not set
+    if (raw === null) return null;
     return raw === "1";
   } catch (_) {
     return null;
   }
 }
 
-// Rule:
-// - On mobile (< MOBILE_BP), default moves collapsed unless user has a saved pref.
-// - On desktop, default open.
 function enforceMobileMovesRule() {
   if (!$movesCard) return;
 
@@ -1466,7 +1357,6 @@ function enforceMobileMovesRule() {
     return;
   }
 
-  // Respect user preference always
   setMovesOpen(saved, { persist: false });
 }
 
@@ -1528,7 +1418,6 @@ function initThemeCollapse() {
    ============================================================================ */
 
 function initThemeControls() {
-  // remark: If the Theme panel isn't in the HTML yet, do nothing safely.
   if (
     !$themeSqLight ||
     !$themeSqDark ||
@@ -1540,7 +1429,6 @@ function initThemeControls() {
     return;
   }
 
-  // remark: Apply on input for instant feedback, and persist.
   const handlers = [
     $themeSqLight,
     $themeSqDark,
@@ -1551,15 +1439,11 @@ function initThemeControls() {
   ];
 
   handlers.forEach(el => {
-    el.addEventListener("input", () => {
-      applyAndSaveThemeFromInputs();
-    });
+    el.addEventListener("input", () => applyAndSaveThemeFromInputs());
   });
 
   if ($themeReset) {
-    $themeReset.addEventListener("click", () => {
-      resetThemeToDefaults();
-    });
+    $themeReset.addEventListener("click", () => resetThemeToDefaults());
   }
 }
 
@@ -1601,19 +1485,18 @@ function setDebugOpen(isOpen) {
    ============================================================================ */
 
 function isTouchDevice() {
-  // Covers iOS/Android + touch laptops in a reasonable way
   return (
     window.matchMedia?.("(pointer: coarse)").matches ||
     "ontouchstart" in window ||
     (navigator.maxTouchPoints ?? 0) > 0
   );
 }
+
 /* ============================================================================
    ===== MAIN INIT ============================================================
    ============================================================================ */
 
 (function main() {
-  // Restore saved game (FEN) before board init so board starts in correct position
   const savedFen = loadFenFromStorage();
 
   if (savedFen) {
@@ -1621,7 +1504,6 @@ function isTouchDevice() {
       game.load(savedFen);
       initialPosition = savedFen;
     } catch (_) {
-      // Invalid saved fen -> reset
       game = new Chess();
       initialPosition = "start";
       clearFenFromStorage();
@@ -1631,38 +1513,28 @@ function isTouchDevice() {
     initialPosition = "start";
   }
 
-  // Restore saved UI settings (play side, highlights, click-to-move, orientation)
   const savedSettings = loadSettingsFromStorage();
   applySettings(savedSettings);
 
-  // remark: Theme init - set input defaults first (so inputs have sane values)
   setInputsToDefaults();
 
-  // remark: If user has a saved theme, apply it now
   const savedTheme = loadThemeFromStorage();
   if (savedTheme) {
     applyTheme(savedTheme);
-    // remark: We keep inputs as the user's current selections (defaults + any later changes)
-    // To keep it simple, we DON'T attempt to reverse rgba(...) back into hex.
-    // Inputs still control the next change.
   } else {
-    // remark: Ensure defaults are actually applied on first run
     applyTheme(getDefaultTheme());
   }
 
   initBoard();
+  initBoardResizeObserver();
   initMovesCollapse();
 
-  // remark: Theme panel (collapse + color pickers)
   initThemeCollapse();
   initThemeControls();
 
-  // Restore ELO before engine init
   loadSavedElo();
-
   loadSavedBlunder();
 
-  // Handle Firefox/Back-Forward cache + form restore mismatch
   window.addEventListener("pageshow", () => {
     syncEloUI();
     syncBlunderUI();
@@ -1676,14 +1548,13 @@ function isTouchDevice() {
   renderMoveList();
   afterLayoutChange();
 
-  // Ensure we save at least once on fresh loads
   saveFenToStorage();
 
   setTimeout(() => {
     if (analysisMode) {
       requestAnalysisNow();
     } else {
-      maybeEnginePlays();
+      maybeEnginePlays(); // will play only if it's engine's turn
     }
   }, 0);
 })();

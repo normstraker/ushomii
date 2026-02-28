@@ -143,6 +143,26 @@ body {
   height: 100%;
 }
 
+/* 2-column desktop: status sits under board, panel spans full height */
+.content {
+  grid-template-rows: auto 1fr;
+}
+
+.board-wrap {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.status-bar {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.panel {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+}
+
 /* =========================================================
    [SECTION: Chessboard.js Theme Overrides]
    These override the built-in light/dark squares.
@@ -788,6 +808,13 @@ html[data-ui="light"] select option {
     grid-template-columns: 1fr;
   }
 
+  /* Make status participate as a grid item */
+  .status-bar {
+    min-width: 0;
+    grid-column: 1;
+    grid-row: 2;
+  }
+
   body {
     overflow: auto;
     -webkit-overflow-scrolling: touch;
@@ -802,6 +829,8 @@ html[data-ui="light"] select option {
   .panel {
     height: auto;
     overflow: visible;
+    grid-column: 1;
+    grid-row: 3;
   }
 
   /* Board fills width but respects height budget */
@@ -809,6 +838,16 @@ html[data-ui="light"] select option {
     --board-max: calc(100dvh - 180px);
     width: min(100%, var(--board-max));
     max-height: var(--board-max);
+  }
+
+  .content {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto; /* board, status, panel */
+  }
+
+  .board-wrap {
+    grid-column: 1;
+    grid-row: 1;
   }
 
   /* Let page scroll instead of tiny internal scroll boxes */
@@ -828,21 +867,37 @@ html[data-ui="light"] select option {
    ========================================================= */
 @media (max-width: 900px) and (orientation: landscape) {
   .content {
-    grid-template-columns: minmax(0, 1fr) 320px;
+    /* Make the panel narrower so board gets room */
+    grid-template-columns: minmax(0, 1fr) clamp(240px, 34vw, 300px);
+    grid-template-rows: auto 1fr; /* status row + panel row on the right */
+    gap: 12px;
   }
-
+  .board-wrap {
+    grid-column: 1;
+    grid-row: 1 / span 2; /* board takes full height on left */
+  }
+  .status-bar {
+    grid-column: 2;
+    grid-row: 1; /* status above panel */
+  }
   .page {
     height: 100dvh;
     overflow: hidden;
   }
 
+  /* Slightly larger height budget for board in landscape */
   .board {
-    --board-max: calc(100dvh - 120px);
+    --board-max: calc(100dvh - 90px);
     width: min(100%, var(--board-max));
     max-height: var(--board-max);
   }
 
   .panel {
+    max-height: calc(100dvh - 40px);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    grid-column: 2;
+    grid-row: 2; /* panel under status */
     max-height: calc(100dvh - 40px);
     overflow: auto;
     -webkit-overflow-scrolling: touch;
