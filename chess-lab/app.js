@@ -1091,6 +1091,29 @@ function onSnapEnd() {
   }
 }
 
+function resetReviewUI() {
+  // Clear any review text / lists
+  if ($reviewStatus) $reviewStatus.textContent = "—";
+  if ($criticalList) $criticalList.innerHTML = "";
+  if ($reviewMoves) {
+    $reviewMoves.style.display = "none";
+    $reviewMoves.innerHTML = "";
+  }
+
+  // Clear the little eval graph if you want (optional)
+  const c = document.getElementById("evalGraph");
+  if (c) {
+    const ctx = c.getContext("2d");
+    ctx.clearRect(0, 0, c.width, c.height);
+  }
+
+  // Leave the card visible, but collapse it
+  if ($reviewCard) {
+    $reviewCard.classList.add("is-collapsed");
+    $reviewCard.classList.remove("is-open");
+  }
+}
+
 /* ============================================================================
    ===== CONTROLS (ELO / NEW GAME / UNDO / FLIP / HIGHLIGHTS) =================
    ============================================================================ */
@@ -1118,7 +1141,6 @@ $playWhite.addEventListener("change", () => {
 });
 
 $newGame.addEventListener("click", () => startNewGame());
-
 $clickToMove?.addEventListener("change", () => {
   saveSettingsToStorage();
   syncDraggableMode();
@@ -1225,6 +1247,8 @@ $pieceSet?.addEventListener("change", () => {
    ============================================================================ */
 
 function startNewGame() {
+  resetReviewUI();
+  setReviewMode(false); // ensure we exit review mode
   game = new Chess();
   board.start(true);
 
@@ -1625,7 +1649,7 @@ function isTouchDevice() {
 function setReviewOpen(isOpen) {
   if (!$reviewCard) return;
 
-  $reviewCard.style.display = isOpen ? "" : "none";
+  // Always visible now (no display toggling)
   $reviewCard.classList.toggle("is-open", isOpen);
   $reviewCard.classList.toggle("is-collapsed", !isOpen);
   afterLayoutChange();

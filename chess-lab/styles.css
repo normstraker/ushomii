@@ -883,10 +883,10 @@ html[data-ui="light"] select option {
   box-shadow: inset 0 0 0 4px var(--hl-last-to);
 }
 
-/* King in check (pulsing glow) */
-.square-check {
-  box-shadow: inset 0 0 0 4px var(--hl-check);
-  animation: checkPulse 0.9s ease-in-out infinite;
+/* Force check / mate highlight to win over other box-shadow rules */
+#board .square-check {
+  box-shadow: inset 0 0 0 4px var(--hl-check) !important;
+  animation: checkPulse 0.9s ease-in-out infinite !important;
 }
 
 @keyframes checkPulse {
@@ -907,10 +907,9 @@ html[data-ui="light"] select option {
   }
 }
 
-/* Checkmate: stronger, faster, "danger" pulse */
-.square-checkmate {
-  box-shadow: inset 0 0 0 5px rgba(255, 0, 0, 0.95);
-  animation: matePulse 0.55s ease-in-out infinite;
+#board .square-checkmate {
+  box-shadow: inset 0 0 0 5px rgba(255, 0, 0, 0.95) !important;
+  animation: matePulse 0.55s ease-in-out infinite !important;
 }
 
 @keyframes matePulse {
