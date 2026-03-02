@@ -40,90 +40,102 @@
         <div class="status status-bar" id="status"></div>
 
         <aside class="panel">
-          <div class="card">
-            <div class="card-title">Opponent Strength</div>
-
-            <label class="label-row" for="elo">
-              <span>ELO - change anytime during game</span>
-              <span class="value" id="eloValue">1200</span>
-            </label>
-
-            <input
-              id="elo"
-              type="range"
-              min="400"
-              max="2500"
-              step="50"
-              value="1200"
-            />
-
-            <label class="label-row" for="blunder">
-              <span>Blunder</span>
-              <span class="value" id="blunderValue">0</span>
-            </label>
-
-            <input
-              id="blunder"
-              type="range"
-              min="-100"
-              max="100"
-              step="5"
-              value="0"
-            />
-
-            <div class="hint">
-              Left = more blunders. Right = less blunders. Center = normal for
-              ELO.
-            </div>
-            <div class="row">
-              <label class="check">
-                <input id="analysisMode" type="checkbox" />
-                <span>Analysis Mode (instant + best line)</span>
-              </label>
-            </div>
-
-            <div
-              class="hint"
-              id="analysisLine"
-              style="display: none; margin-top: 8px"
+          <div class="card is-open" id="opponentCard">
+            <button
+              class="card-title collapsible"
+              id="opponentToggle"
+              type="button"
             >
-              —
-            </div>
+              <span>Opponent Strength</span>
+              <span class="chev" id="opponentChev">▸</span>
+            </button>
 
-            <div class="row">
-              <label class="check">
-                <input id="clickToMove" type="checkbox" checked />
-                <span>Click-to-move (pick up / put down)</span>
+            <div class="collapsible-body" id="opponentBody">
+              <label class="label-row" for="elo">
+                <span>ELO - change anytime during game</span>
+                <span class="value" id="eloValue">1200</span>
               </label>
-            </div>
 
-            <div class="row">
-              <label class="check">
-                <input id="showMoveDots" type="checkbox" checked />
-                <span>Show legal move dots</span>
-              </label>
-            </div>
-            <div class="row">
-              <label class="check">
-                <input id="showMoveSquares" type="checkbox" checked />
-                <span>Show legal move squares</span>
-              </label>
-            </div>
+              <input
+                id="elo"
+                type="range"
+                min="400"
+                max="2500"
+                step="50"
+                value="1200"
+              />
 
-            <div class="row">
-              <label class="check">
-                <input id="playWhite" type="checkbox" checked />
-                <span>Play as White</span>
+              <label class="label-row" for="blunder">
+                <span>Blunder</span>
+                <span class="value" id="blunderValue">0</span>
               </label>
-            </div>
 
-            <div class="row">
-              <button id="newGame">New Game</button>
-              <button id="undo">Undo</button>
-              <button id="flip">Flip</button>
-              <button id="reviewGame" style="display: none">Review Game</button>
+              <input
+                id="blunder"
+                type="range"
+                min="-100"
+                max="100"
+                step="5"
+                value="0"
+              />
+
+              <div class="hint">
+                Left = more blunders. Right = less blunders. Center = normal for
+                ELO.
+              </div>
+              <div class="row">
+                <label class="check">
+                  <input id="analysisMode" type="checkbox" />
+                  <span>Analysis Mode (instant + best line)</span>
+                </label>
+              </div>
+
+              <div
+                class="hint"
+                id="analysisLine"
+                style="display: none; margin-top: 8px"
+              >
+                —
+              </div>
+
+              <div class="row">
+                <label class="check">
+                  <input id="clickToMove" type="checkbox" checked />
+                  <span>Click-to-move (pick up / put down)</span>
+                </label>
+              </div>
+
+              <div class="row">
+                <label class="check">
+                  <input id="showMoveDots" type="checkbox" checked />
+                  <span>Show legal move dots</span>
+                </label>
+              </div>
+              <div class="row">
+                <label class="check">
+                  <input id="showMoveSquares" type="checkbox" checked />
+                  <span>Show legal move squares</span>
+                </label>
+              </div>
+
+              <div class="row">
+                <label class="check">
+                  <input id="playWhite" type="checkbox" checked />
+                  <span>Play as White</span>
+                </label>
+              </div>
+
+              <div class="row">
+                <button id="newGame">New Game</button>
+                <button id="undo">Undo</button>
+                <button id="flip">Flip</button>
+                <button id="reviewGame" style="display: none">
+                  Review Game
+                </button>
+              </div>
             </div>
           </div>
+
           <div class="card" id="themeCard">
             <button
               class="card-title collapsible"

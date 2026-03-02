@@ -557,6 +557,21 @@ body {
   margin-top: 0;
 }
 
+/* Opponent Strength collapsed state */
+#opponentCard.is-collapsed .collapsible-body {
+  max-height: 0;
+  opacity: 0;
+  margin-top: 0;
+}
+
+#opponentCard.is-open .chev {
+  transform: rotate(90deg);
+}
+
+#opponentCard.is-open .chev {
+  transform: rotate(90deg);
+}
+
 /* =========================================================
    [SECTION: Controls]
    ========================================================= */

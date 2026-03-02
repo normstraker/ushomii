@@ -1171,6 +1171,20 @@ $reviewToggle?.addEventListener("click", () => {
   afterLayoutChange();
 });
 
+// Opponent Strength collapsible
+const $opponentCard = document.getElementById("opponentCard");
+if ($opponentCard) {
+  const $opponentToggle = $opponentCard.querySelector(
+    ".card-title.collapsible",
+  );
+  if ($opponentToggle) {
+    $opponentToggle.addEventListener("click", () => {
+      $opponentCard.classList.toggle("is-collapsed");
+      $opponentCard.classList.toggle("is-open");
+    });
+  }
+}
+
 // ===== UNDO CONTROL =====
 $undo.addEventListener("click", () => {
   if (game.history().length === 0) return;
