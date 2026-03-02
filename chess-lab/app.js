@@ -44,6 +44,7 @@ let review = {
 const $status = document.getElementById("status");
 const $debug = document.getElementById("debug");
 const $moves = document.getElementById("moves");
+const $reviewMoves = document.getElementById("reviewMoves");
 const $elo = document.getElementById("elo");
 const $eloValue = document.getElementById("eloValue");
 const $newGame = document.getElementById("newGame");
@@ -1635,6 +1636,10 @@ function setReviewMode(on) {
   if ($showMoveSquares) $showMoveSquares.disabled = reviewMode;
   if ($showMoveDots) $showMoveDots.disabled = reviewMode;
 
+  // Swap move list UI
+  if ($moves) $moves.style.display = reviewMode ? "none" : "";
+  if ($reviewMoves) $reviewMoves.style.display = reviewMode ? "" : "none";
+
   if (!reviewMode) {
     setReviewOpen(false);
     if ($reviewGame) $reviewGame.style.display = "none";
@@ -1933,6 +1938,136 @@ function renderCriticalList() {
   }
 }
 
+function buildBlunderIndexMap() {
+  // plyIndex -> { drop, label }
+  const map = new Map();
+  for (const b of review.blunders || []) {
+    map.set(b.plyIndex, b);
+  }
+  return map;
+}
+
+function renderReviewMovesList() {
+  if (!$reviewMoves) return;
+  $reviewMoves.innerHTML = "";
+
+  const blMap = buildBlunderIndexMap();
+
+  // We want to display by full moves (white+black), but clickable by ply.
+  // review.plys[0] is start; ply 1 is white move 1, ply 2 black move 1, etc.
+  const totalPlys = review.plys.length - 1;
+  const totalMoves = Math.ceil(totalPlys / 2);
+
+  for (let moveNo = 1; moveNo <= totalMoves; moveNo++) {
+    const whitePly = moveNo * 2 - 1;
+    const blackPly = moveNo * 2;
+
+    const whiteSan = review.plys[whitePly]?.san ?? "";
+    const blackSan = review.plys[blackPly]?.san ?? "";
+
+    // Row for White move
+    if (whitePly < review.plys.length) {
+      const whiteTag = blMap.get(whitePly);
+      const row = document.createElement("div");
+      row.className = "review-move-row";
+      row.dataset.ply = String(whitePly);
+
+      const num = document.createElement("div");
+      num.className = "review-move-num";
+      num.textContent = `${moveNo}.`;
+
+      const san = document.createElement("div");
+      san.className = "review-move-san";
+      san.textContent = whiteSan || "—";
+
+      const tag = document.createElement("div");
+      tag.className = "review-tag";
+      if (whiteTag) {
+        const cls =
+          whiteTag.label === "Blunder"
+            ? "blunder"
+            : whiteTag.label === "Mistake"
+              ? "mistake"
+              : "inaccuracy";
+        tag.classList.add(cls);
+        tag.textContent =
+          whiteTag.label === "Blunder"
+            ? "?? Blunder"
+            : whiteTag.label === "Mistake"
+              ? "?! Mistake"
+              : "!? Inaccuracy";
+      } else {
+        tag.textContent = "";
+        tag.style.borderColor = "transparent";
+      }
+
+      row.appendChild(num);
+      row.appendChild(san);
+      row.appendChild(tag);
+
+      row.addEventListener("click", () => gotoReviewPly(whitePly));
+      $reviewMoves.appendChild(row);
+    }
+
+    // Row for Black move
+    if (blackPly < review.plys.length) {
+      const blackTag = blMap.get(blackPly);
+      const row = document.createElement("div");
+      row.className = "review-move-row";
+      row.dataset.ply = String(blackPly);
+
+      const num = document.createElement("div");
+      num.className = "review-move-num";
+      num.textContent = ""; // blank for black row
+
+      const san = document.createElement("div");
+      san.className = "review-move-san";
+      san.textContent = blackSan || "—";
+
+      const tag = document.createElement("div");
+      tag.className = "review-tag";
+      if (blackTag) {
+        const cls =
+          blackTag.label === "Blunder"
+            ? "blunder"
+            : blackTag.label === "Mistake"
+              ? "mistake"
+              : "inaccuracy";
+        tag.classList.add(cls);
+        tag.textContent =
+          blackTag.label === "Blunder"
+            ? "?? Blunder"
+            : blackTag.label === "Mistake"
+              ? "?! Mistake"
+              : "!? Inaccuracy";
+      } else {
+        tag.textContent = "";
+        tag.style.borderColor = "transparent";
+      }
+
+      row.appendChild(num);
+      row.appendChild(san);
+      row.appendChild(tag);
+
+      row.addEventListener("click", () => gotoReviewPly(blackPly));
+      $reviewMoves.appendChild(row);
+    }
+  }
+
+  highlightCurrentReviewMoveRow();
+}
+
+function highlightCurrentReviewMoveRow() {
+  if (!$reviewMoves) return;
+  const rows = $reviewMoves.querySelectorAll(".review-move-row");
+  rows.forEach(r => r.classList.remove("is-current"));
+
+  const current = $reviewMoves.querySelector(
+    `.review-move-row[data-ply="${review.currentPly}"]`,
+  );
+  if (current) current.classList.add("is-current");
+}
+
 function updateReviewStatusLine() {
   if (!$reviewStatus) return;
 
@@ -1969,6 +2104,7 @@ function gotoReviewPly(index) {
 
   updateReviewStatusLine();
   drawEvalGraph(review.plys, review.evals, review.currentPly);
+  highlightCurrentReviewMoveRow();
 }
 
 async function startPostGameReview() {
@@ -2039,6 +2175,7 @@ async function startPostGameReview() {
   }
 
   renderCriticalList();
+  renderReviewMovesList();
   gotoReviewPly(review.currentPly);
 
   review.running = false;
