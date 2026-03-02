@@ -121,6 +121,7 @@
               <button id="newGame">New Game</button>
               <button id="undo">Undo</button>
               <button id="flip">Flip</button>
+              <button id="reviewGame" style="display: none">Review Game</button>
             </div>
           </div>
           <div class="card" id="themeCard">
@@ -213,6 +214,38 @@
               <div class="moves-body">
                 <pre id="moves" class="moves"></pre>
               </div>
+            </div>
+          </div>
+
+          <div class="card" id="reviewCard" style="display: none">
+            <button
+              class="card-title collapsible"
+              id="reviewToggle"
+              type="button"
+            >
+              Review <span class="chev" id="reviewChev">▸</span>
+            </button>
+
+            <div class="collapsible-body" id="reviewBody">
+              <div class="hint" id="reviewStatus">—</div>
+
+              <canvas
+                id="evalGraph"
+                width="280"
+                height="120"
+                style="width: 100%; height: auto"
+              ></canvas>
+
+              <div class="row">
+                <button id="reviewPrev" type="button">◂ Prev</button>
+                <button id="reviewNext" type="button">Next ▸</button>
+                <button id="reviewExit" type="button">Exit</button>
+              </div>
+
+              <div class="hint" style="margin-top: 10px">
+                Critical positions
+              </div>
+              <div id="criticalList" style="display: grid; gap: 6px"></div>
             </div>
           </div>
 

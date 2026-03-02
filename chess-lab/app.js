@@ -27,6 +27,16 @@ let analysisMode = false;
 let $engineInline = null;
 let thinkingDelayTimer = null;
 
+let reviewMode = false;
+
+let review = {
+  plys: [], // [{ fen, san, uci, turn, moveNumber }]
+  evals: [], // [{ cp, mate, povCp }]
+  blunders: [], // [{ plyIndex, drop, label }]
+  currentPly: 0,
+  running: false,
+};
+
 /* ============================================================================
    ===== DOM REFERENCES =======================================================
    ============================================================================ */
@@ -61,6 +71,16 @@ const $pieceSet = document.getElementById("pieceSet");
 const $uiTheme = document.getElementById("uiTheme");
 const $analysisMode = document.getElementById("analysisMode");
 const $analysisLine = document.getElementById("analysisLine");
+const $reviewGame = document.getElementById("reviewGame");
+const $reviewCard = document.getElementById("reviewCard");
+const $reviewToggle = document.getElementById("reviewToggle");
+const $reviewBody = document.getElementById("reviewBody");
+const $reviewStatus = document.getElementById("reviewStatus");
+const $evalGraph = document.getElementById("evalGraph");
+const $reviewPrev = document.getElementById("reviewPrev");
+const $reviewNext = document.getElementById("reviewNext");
+const $reviewExit = document.getElementById("reviewExit");
+const $criticalList = document.getElementById("criticalList");
 
 /* ============================================================================
    ===== PERSISTENCE (FEN) ====================================================
@@ -87,6 +107,45 @@ function clearFenFromStorage() {
   try {
     localStorage.removeItem(STORAGE_FEN);
   } catch (_) {}
+}
+
+// ======================
+// PGN persistence (move history)
+// ======================
+const STORAGE_PGN = "chesslab_pgn_v1";
+
+function savePgnToStorage() {
+  try {
+    localStorage.setItem(STORAGE_PGN, game.pgn());
+  } catch (_) {}
+}
+
+function loadPgnFromStorage() {
+  try {
+    return localStorage.getItem(STORAGE_PGN);
+  } catch (_) {
+    return null;
+  }
+}
+
+function clearPgnFromStorage() {
+  try {
+    localStorage.removeItem(STORAGE_PGN);
+  } catch (_) {}
+}
+
+// chess.js compatibility wrapper (some builds use load_pgn, some loadPgn)
+function loadPgnIntoGame(chessInstance, pgn) {
+  if (!pgn) return false;
+  try {
+    if (typeof chessInstance.load_pgn === "function") {
+      return chessInstance.load_pgn(pgn, { sloppy: true });
+    }
+    if (typeof chessInstance.loadPgn === "function") {
+      return chessInstance.loadPgn(pgn, { sloppy: true });
+    }
+  } catch (_) {}
+  return false;
 }
 
 const STORAGE_SETTINGS = "chesslab_settings_v1";
@@ -340,6 +399,21 @@ function ensureEngineInline() {
   $engineInline.innerHTML = `<span class="spinner" aria-hidden="true"></span>Thinking…`;
 
   $status.appendChild($engineInline);
+}
+
+function scoreToPovCp(scoreCp, scoreMate, povColor /* 'w' or 'b' */) {
+  // Stockfish scores are from side-to-move POV (commonly).
+  // For a consistent graph, we convert to "White POV".
+  // We treat mate as huge cp.
+  let cp;
+  if (scoreMate !== null) cp = Math.sign(scoreMate) * 100000;
+  else cp = scoreCp ?? 0;
+
+  // If we want White POV, and it's Black POV, invert
+  // We'll define povColor = 'w' means "white advantage positive"
+  // Our cp is assumed "side-to-move"; we will rebase using FEN turn.
+  // We'll do the rebase elsewhere with fenTurn.
+  return cp;
 }
 
 /* ============================================================================
@@ -762,6 +836,7 @@ function getEngineCandidates({
   movetimeMs = 200,
   multiPV = 5,
   targetDepth = 10,
+  fenOverride = null,
 } = {}) {
   return new Promise(async resolve => {
     if (!sf) {
@@ -821,7 +896,8 @@ function getEngineCandidates({
     };
 
     sf.postMessage(`setoption name MultiPV value ${multiPV}`);
-    sf.postMessage(`position fen ${game.fen()}`);
+    const fen = arguments[0]?.fenOverride || game.fen();
+    sf.postMessage(`position fen ${fenOverride || game.fen()}`);
     sf.postMessage(`go movetime ${movetimeMs}`);
   });
 }
@@ -845,6 +921,15 @@ function updateStatus() {
 
   $status.textContent = status;
   ensureEngineInline();
+
+  // Show Review button only when game is over
+  if ($reviewGame) {
+    $reviewGame.style.display = game.isGameOver() ? "" : "none";
+  }
+
+  // Keep review card hidden unless actively reviewing
+  if (!reviewMode) setReviewOpen(false);
+
   highlightCheck();
 }
 
@@ -944,6 +1029,7 @@ async function maybeEnginePlays() {
     highlightLastMove(from, to);
 
     saveFenToStorage();
+    savePgnToStorage();
 
     // After engine moves, it's the human's turn -> safe to analyze
     if (analysisMode) requestAnalysisNow();
@@ -955,6 +1041,7 @@ async function maybeEnginePlays() {
    ============================================================================ */
 
 function onDragStart(source, piece) {
+  if (reviewMode) return false;
   if ($clickToMove?.checked) return false;
   if (game.isGameOver()) return false;
   if (!isHumansTurn()) return false;
@@ -984,6 +1071,7 @@ function onDrop(source, target) {
 
   // Persist after human drag move
   saveFenToStorage();
+  savePgnToStorage();
 
   clearHighlights();
   selectedSquare = null;
@@ -1064,6 +1152,24 @@ $analysisMode?.addEventListener("change", () => {
   saveSettingsToStorage();
 });
 
+$reviewGame?.addEventListener("click", () => startPostGameReview());
+
+$reviewPrev?.addEventListener("click", () =>
+  gotoReviewPly(review.currentPly - 1),
+);
+$reviewNext?.addEventListener("click", () =>
+  gotoReviewPly(review.currentPly + 1),
+);
+$reviewExit?.addEventListener("click", () => exitReview());
+
+// Collapsible Review card
+$reviewToggle?.addEventListener("click", () => {
+  const nowOpen = !$reviewCard.classList.contains("is-open");
+  $reviewCard.classList.toggle("is-open", nowOpen);
+  $reviewCard.classList.toggle("is-collapsed", !nowOpen);
+  afterLayoutChange();
+});
+
 // ===== UNDO CONTROL =====
 $undo.addEventListener("click", () => {
   if (game.history().length === 0) return;
@@ -1080,6 +1186,7 @@ $undo.addEventListener("click", () => {
   clearLastMoveHighlight();
 
   saveFenToStorage();
+  savePgnToStorage();
 
   // After undo it's always human's turn in your logic -> safe to analyze
   if (analysisMode) requestAnalysisNow();
@@ -1107,7 +1214,9 @@ function startNewGame() {
   board.start(true);
 
   clearFenFromStorage();
+  clearPgnFromStorage();
   saveFenToStorage();
+  savePgnToStorage();
 
   engineReplyRequested = false;
   clearEngineReplyTimer();
@@ -1203,6 +1312,7 @@ function initBoard() {
   boardEl.onclick = null;
 
   boardEl.addEventListener("click", e => {
+    if (reviewMode) return;
     if (!$clickToMove?.checked) return;
     if (game.isGameOver()) return;
     if (!isHumansTurn()) return;
@@ -1251,6 +1361,7 @@ function initBoard() {
     highlightLastMove(selectedSquare, square);
 
     saveFenToStorage();
+    savePgnToStorage();
 
     clearHighlights();
     selectedSquare = null;
@@ -1493,21 +1604,480 @@ function isTouchDevice() {
 }
 
 /* ============================================================================
+   ===== POST-GAME REVIEW MODE ================================================
+   ============================================================================ */
+
+function setReviewOpen(isOpen) {
+  if (!$reviewCard) return;
+
+  $reviewCard.style.display = isOpen ? "" : "none";
+  $reviewCard.classList.toggle("is-open", isOpen);
+  $reviewCard.classList.toggle("is-collapsed", !isOpen);
+  afterLayoutChange();
+}
+
+function setReviewMode(on) {
+  reviewMode = !!on;
+
+  // Lock the board from interaction in review mode
+  if (board) {
+    board.draggable = !reviewMode && !$clickToMove?.checked;
+    if (board.cfg) board.cfg.draggable = board.draggable;
+  }
+
+  // Disable gameplay buttons in review mode
+  if ($undo) $undo.disabled = reviewMode;
+  if ($newGame) $newGame.disabled = false; // allow new game anytime
+  if ($elo) $elo.disabled = reviewMode;
+  if ($playWhite) $playWhite.disabled = reviewMode;
+
+  if ($clickToMove) $clickToMove.disabled = reviewMode;
+  if ($showMoveSquares) $showMoveSquares.disabled = reviewMode;
+  if ($showMoveDots) $showMoveDots.disabled = reviewMode;
+
+  if (!reviewMode) {
+    setReviewOpen(false);
+    if ($reviewGame) $reviewGame.style.display = "none";
+  }
+}
+
+function buildPlyListFromGame() {
+  const tmp = new Chess();
+  const plys = [];
+
+  // ply 0 (start)
+  plys.push({
+    fen: tmp.fen(),
+    san: "(start)",
+    uci: "",
+    turn: tmp.turn(),
+    moveNumber: 0,
+  });
+
+  // Try verbose first, but fall back safely
+  let hist;
+  try {
+    hist = game.history({ verbose: true });
+  } catch (_) {
+    hist = null;
+  }
+
+  // If verbose isn't supported (or returns strings), use SAN list
+  const isVerboseObjects =
+    Array.isArray(hist) && hist.length > 0 && typeof hist[0] === "object";
+
+  if (!isVerboseObjects) {
+    const sans = game.history(); // array of SAN strings
+    for (let i = 0; i < sans.length; i++) {
+      const san = sans[i];
+
+      // sloppy:true helps SAN parsing across chess.js variants
+      const mv = tmp.move(san, { sloppy: true }) || tmp.move(san);
+      if (!mv) continue;
+
+      const uci = `${mv.from}${mv.to}${mv.promotion || ""}`;
+      plys.push({
+        fen: tmp.fen(),
+        san: mv.san || san,
+        uci,
+        turn: tmp.turn(),
+        moveNumber: Math.floor(i / 2) + 1,
+      });
+    }
+
+    return plys;
+  }
+
+  // Verbose objects path
+  for (let i = 0; i < hist.length; i++) {
+    const m = hist[i];
+
+    // m should be { from,to,san,promotion,... }
+    const mv = tmp.move(m);
+    if (!mv) continue;
+
+    const uci = `${m.from}${m.to}${m.promotion || ""}`;
+    plys.push({
+      fen: tmp.fen(),
+      san: m.san || mv.san,
+      uci,
+      turn: tmp.turn(),
+      moveNumber: Math.floor(i / 2) + 1,
+    });
+  }
+
+  return plys;
+}
+
+async function analyzeFenOnce(fen, opts = {}) {
+  const { movetimeMs = 160, targetDepth = 10 } = opts;
+
+  const candidates = await getEngineCandidates({
+    movetimeMs,
+    multiPV: 1,
+    targetDepth,
+    fenOverride: fen,
+  });
+
+  const best = candidates?.[0];
+  if (!best) return { cp: 0, mate: null };
+
+  return {
+    cp: best.scoreCp ?? 0,
+    mate: best.scoreMate ?? null,
+  };
+}
+
+function fenTurn(fen) {
+  // fen: ".... w ..."
+  const parts = String(fen).split(" ");
+  return parts[1] === "b" ? "b" : "w";
+}
+
+function toWhitePovCp(rawCp, rawMate, fen) {
+  // If score is from side-to-move POV, flip when black to move.
+  let cp = rawMate !== null ? Math.sign(rawMate) * 100000 : (rawCp ?? 0);
+  const turn = fenTurn(fen);
+  // side-to-move POV -> white POV:
+  // if black to move, invert.
+  if (turn === "b") cp = -cp;
+  return cp;
+}
+
+function computeBlundersFromEvals(plys, evals) {
+  // Simple swing-based blunders:
+  // compare eval before move vs after move (white POV).
+  // Mark big drops for the side who just moved.
+  const out = [];
+  const THRESH = 220; // cp swing threshold (tweak later)
+
+  // evals[i] corresponds to plys[i]
+  for (let i = 1; i < evals.length; i++) {
+    const before = evals[i - 1]?.povCp ?? 0;
+    const after = evals[i]?.povCp ?? 0;
+
+    // Who played the move leading to position i?
+    // Position i is AFTER move i (ply i), so mover is opposite of turn in plys[i]
+    const mover = plys[i]?.turn === "w" ? "b" : "w";
+
+    // From mover POV, a "drop" means it got worse for them.
+    // If mover is White, worsening means white POV decreased.
+    // If mover is Black, worsening means white POV increased.
+    let drop;
+    if (mover === "w") drop = before - after;
+    else drop = after - before;
+
+    if (drop >= THRESH) {
+      const label =
+        drop >= 600 ? "Blunder" : drop >= 350 ? "Mistake" : "Inaccuracy";
+      out.push({ plyIndex: i, drop: Math.round(drop), label });
+    }
+  }
+
+  return out.sort((a, b) => b.drop - a.drop);
+}
+
+// PASTE STARTS HERE
+function plyToMoveLabel(plyIndex) {
+  if (plyIndex === 0) return "Start position";
+  const moveNo = Math.ceil(plyIndex / 2);
+  const side = plyIndex % 2 === 1 ? "White" : "Black";
+  return `Move ${moveNo} — ${side}`;
+}
+
+function formatEvalHuman(povCp, mate) {
+  if (mate !== null && mate !== undefined) {
+    if (mate === 0) return "Checkmate";
+    return mate > 0
+      ? `White mates in ${mate}`
+      : `Black mates in ${Math.abs(mate)}`;
+  }
+
+  const pawns = (povCp ?? 0) / 100;
+  const abs = Math.abs(pawns);
+  const side = pawns > 0 ? "White" : pawns < 0 ? "Black" : "Even";
+
+  if (abs < 0.3) return "Even";
+  if (abs < 1.2) return `${side} slightly better (${abs.toFixed(1)})`;
+  if (abs < 3.0) return `${side} better (${abs.toFixed(1)})`;
+  if (abs < 6.0) return `${side} winning (${abs.toFixed(1)})`;
+  return `${side} winning (9.9+)`;
+}
+
+function explainSanBasic(san) {
+  if (!san || san === "(start)") return "";
+
+  // Castling
+  if (san === "O-O") return "Castles kingside";
+  if (san === "O-O-O") return "Castles queenside";
+
+  const pieceMap = {
+    K: "King",
+    Q: "Queen",
+    R: "Rook",
+    B: "Bishop",
+    N: "Knight",
+  };
+
+  const check = san.includes("#")
+    ? " (checkmate)"
+    : san.includes("+")
+      ? " (check)"
+      : "";
+
+  // Strip check symbols for parsing
+  let s = san.replace(/[+#]/g, "");
+
+  // Pawn move/capture
+  if (!/^[KQRBN]/.test(s)) {
+    if (s.includes("x")) {
+      const toSq = s.split("x")[1];
+      return `Pawn captures on ${toSq}${check}`;
+    }
+    // pawn push like e4
+    if (/^[a-h][1-8]$/.test(s)) return `Pawn to ${s}${check}`;
+    return `Pawn move ${san}${check}`;
+  }
+
+  // Piece move/capture
+  const piece = pieceMap[s[0]] || "Piece";
+  const isCapture = s.includes("x");
+  const toSq = s.slice(-2);
+  if (isCapture) return `${piece} captures on ${toSq}${check}`;
+  return `${piece} to ${toSq}${check}`;
+}
+
+function drawEvalGraph(plys, evals, currentIndex) {
+  if (!$evalGraph) return;
+  const ctx = $evalGraph.getContext("2d");
+  if (!ctx) return;
+
+  const w = $evalGraph.width;
+  const h = $evalGraph.height;
+
+  ctx.clearRect(0, 0, w, h);
+
+  // Frame
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+
+  if (!evals || evals.length < 2) return;
+
+  // Clamp evals for display (±800 cp), mate gets clamped
+  const CLAMP = 800;
+
+  const xs = i => (i / (evals.length - 1)) * (w - 10) + 5;
+  const ys = cp => {
+    const c = Math.max(-CLAMP, Math.min(CLAMP, cp));
+    const t = (c + CLAMP) / (2 * CLAMP); // 0..1
+    return (1 - t) * (h - 10) + 5;
+  };
+
+  // Zero line
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(255,255,255,0.10)";
+  ctx.moveTo(5, ys(0));
+  ctx.lineTo(w - 5, ys(0));
+  ctx.stroke();
+
+  // Line
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(255,255,255,0.75)";
+  ctx.lineWidth = 2;
+
+  for (let i = 0; i < evals.length; i++) {
+    const x = xs(i);
+    const y = ys(evals[i].povCp);
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Current marker
+  const cx = xs(currentIndex);
+  ctx.beginPath();
+  ctx.strokeStyle = "rgba(255,255,255,0.85)";
+  ctx.lineWidth = 1;
+  ctx.moveTo(cx, 5);
+  ctx.lineTo(cx, h - 5);
+  ctx.stroke();
+}
+
+function renderCriticalList() {
+  if (!$criticalList) return;
+  $criticalList.innerHTML = "";
+
+  const top = review.blunders.slice(0, 8);
+  if (top.length === 0) {
+    const div = document.createElement("div");
+    div.className = "hint";
+    div.textContent = "No big blunders detected (nice).";
+    $criticalList.appendChild(div);
+    return;
+  }
+
+  for (const b of top) {
+    const ply = review.plys[b.plyIndex];
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = b.label === "Blunder" ? "blunder" : "";
+    btn.textContent = `Move ${ply.moveNumber}${b.plyIndex % 2 === 1 ? " (White)" : " (Black)"}: ${ply.san}`;
+    const tag = document.createElement("span");
+    tag.className = "tag";
+    tag.textContent = `${b.label} (−${b.drop}cp)`;
+    btn.appendChild(tag);
+
+    btn.addEventListener("click", () => gotoReviewPly(b.plyIndex));
+    $criticalList.appendChild(btn);
+  }
+}
+
+function updateReviewStatusLine() {
+  if (!$reviewStatus) return;
+
+  const plyIndex = review.currentPly;
+  const ply = review.plys[plyIndex];
+  const ev = review.evals[plyIndex];
+
+  const moveLabel = plyToMoveLabel(plyIndex);
+  const san = plyIndex === 0 ? "" : (ply?.san ?? "");
+  const explain = san ? explainSanBasic(san) : "";
+  const moveText =
+    plyIndex === 0
+      ? "(start position)"
+      : explain
+        ? `${san} — ${explain}`
+        : san || "—";
+
+  let evalText = "—";
+  if (ev) evalText = formatEvalHuman(ev.povCp ?? 0, ev.mate);
+
+  $reviewStatus.textContent = `${moveLabel}: ${moveText} | Eval: ${evalText}`;
+}
+
+function gotoReviewPly(index) {
+  index = Math.max(0, Math.min(review.plys.length - 1, index));
+  review.currentPly = index;
+
+  const fen = review.plys[index].fen;
+  if (board) board.position(fen, true);
+
+  clearHighlights();
+  clearLastMoveHighlight();
+  clearCheckHighlight();
+
+  updateReviewStatusLine();
+  drawEvalGraph(review.plys, review.evals, review.currentPly);
+}
+
+async function startPostGameReview() {
+  if (review.running) return;
+  if (!sf) return;
+
+  review.running = true;
+  setReviewMode(true);
+  setReviewOpen(true);
+
+  // Safety: if history is empty but PGN exists, rebuild game from PGN so review works
+  if (game.history().length === 0) {
+    const pgn = loadPgnFromStorage();
+    if (pgn) {
+      const rebuilt = new Chess();
+      if (loadPgnIntoGame(rebuilt, pgn)) {
+        game = rebuilt;
+      }
+    }
+  }
+
+  // Build ply list
+  review.plys = buildPlyListFromGame();
+  logDebug(`Review plys: ${review.plys.length}`);
+  review.evals = new Array(review.plys.length).fill(null);
+  review.blunders = [];
+  review.currentPly = review.plys.length - 1;
+
+  if ($reviewStatus) $reviewStatus.textContent = "Analyzing game…";
+  if ($criticalList) $criticalList.innerHTML = "";
+  drawEvalGraph(review.plys, [], 0);
+
+  // Analyze each position (ply) quickly
+  for (let i = 0; i < review.plys.length; i++) {
+    // If user exits review while running
+    if (!reviewMode) break;
+
+    const fen = review.plys[i].fen;
+    const r = await analyzeFenOnce(fen, { movetimeMs: 140, targetDepth: 10 });
+
+    const povCp = toWhitePovCp(r.cp, r.mate, fen);
+
+    review.evals[i] = {
+      cp: r.cp,
+      mate: r.mate,
+      povCp: povCp,
+    };
+
+    // Live update graph every few points
+    if (i % 4 === 0 || i === review.plys.length - 1) {
+      drawEvalGraph(
+        review.plys,
+        review.evals.filter(Boolean),
+        review.currentPly,
+      );
+    }
+  }
+
+  // Compute blunders once evals exist
+  if (review.evals.every(Boolean)) {
+    review.blunders = computeBlundersFromEvals(review.plys, review.evals);
+  } else {
+    // Partial run (user exited early) — compute with what we have
+    const partialEvals = review.evals.map((e, idx) =>
+      e ? e : { povCp: 0, mate: null, cp: 0 },
+    );
+    review.blunders = computeBlundersFromEvals(review.plys, partialEvals);
+  }
+
+  renderCriticalList();
+  gotoReviewPly(review.currentPly);
+
+  review.running = false;
+}
+
+function exitReview() {
+  review.running = false;
+  setReviewMode(false);
+
+  // Return to the actual final game position
+  if (board) board.position(game.fen(), true);
+  updateStatus();
+  renderMoveList();
+  highlightCheck();
+}
+
+/* ============================================================================
    ===== MAIN INIT ============================================================
    ============================================================================ */
 
 (function main() {
+  const savedPgn = loadPgnFromStorage();
   const savedFen = loadFenFromStorage();
 
-  if (savedFen) {
+  // Prefer PGN (it contains move history)
+  if (savedPgn && loadPgnIntoGame(game, savedPgn)) {
+    initialPosition = game.fen();
+  } else if (savedFen) {
+    // Fallback: fen only (no history)
     try {
       game.load(savedFen);
-      initialPosition = savedFen;
+      initialPosition = game.fen();
     } catch (_) {
       game = new Chess();
       initialPosition = "start";
       clearFenFromStorage();
+      clearPgnFromStorage();
       saveFenToStorage();
+      savePgnToStorage();
     }
   } else {
     initialPosition = "start";

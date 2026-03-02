@@ -360,6 +360,38 @@ body {
 }
 
 /* =========================================================
+   [SECTION: Review Mode UI]
+   ========================================================= */
+
+#reviewCard .collapsible-body {
+  max-height: 600px;
+}
+
+#evalGraph {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+#criticalList button {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+
+#criticalList .tag {
+  display: inline-block;
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+#criticalList .blunder {
+  border-color: rgba(255, 0, 0, 0.5);
+}
+
+/* =========================================================
    [SECTION: Panel Scroll Areas]
    ========================================================= */
 
