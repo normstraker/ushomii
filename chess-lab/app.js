@@ -596,8 +596,6 @@ function highlightLastMove(from, to) {
 
 function clearCheckHighlight() {
   $("#board .square-55d63").removeClass("square-check square-checkmate");
-  // ALSO clear any king-piece glow on the pieces layer
-  $("#board .piece-417db").removeClass("piece-check piece-checkmate");
 }
 
 function findKingSquareFromFen(fen, color /* 'w'|'b' */) {
@@ -620,15 +618,12 @@ function findKingSquareFromFen(fen, color /* 'w'|'b' */) {
 }
 
 function highlightCheck() {
-  clearCheckHighlight();
-
+  // chess.js compatibility
   const inCheck =
     (typeof game.isCheck === "function" && game.isCheck()) ||
     (typeof game.inCheck === "function" && game.inCheck()) ||
     (typeof game.in_check === "function" && game.in_check()) ||
     false;
-
-  if (!inCheck) return;
 
   const inMate =
     (typeof game.isCheckmate === "function" && game.isCheckmate()) ||
@@ -636,37 +631,36 @@ function highlightCheck() {
     (typeof game.in_checkmate === "function" && game.in_checkmate()) ||
     false;
 
+  // Always clear first (but do it AFTER a redraw-safe tick too)
+  const fen = game.fen();
   const turn = game.turn();
-  const kingSq = findKingSquareFromFen(game.fen(), turn);
-  if (!kingSq) return;
-
-  console.log("[highlightCheck]", {
-    inCheck,
-    inMate,
-    turn,
-    kingSq,
-    fen: game.fen(),
-    elFound: !!document.querySelector(
-      `#board .square-55d63[data-square="${kingSq}"]`,
-    ),
-  });
-
-  const el = document.querySelector(
-    `#board .square-55d63[data-square="${kingSq}"]`,
-  );
-  if (!el) return;
-
-  // Square layer (nice, but can be hidden by pieces)
-  el.classList.add(inMate ? "square-checkmate" : "square-check");
-
-  // Pieces layer (this is the visible fix)
-  const pieceEl = document.querySelector(
-    `#board .piece-417db.square-${kingSq}`,
-  );
-  if (pieceEl) {
-    pieceEl.classList.add(inMate ? "piece-checkmate" : "piece-check");
+  const kingSq = findKingSquareFromFen(fen, turn);
+  if (!inCheck || !kingSq) {
+    clearCheckHighlight();
+    return;
   }
+
+  const apply = () => {
+    // Clear any previous red
+    clearCheckHighlight();
+
+    // Chessboard.js squares are like: .square-e3
+    const el = document.querySelector(`#board .square-${kingSq}`);
+    if (!el) return false;
+
+    el.classList.add(inMate ? "square-checkmate" : "square-check");
+    return true;
+  };
+
+  // Run after DOM repaint (prevents chessboard.js redraw from wiping it)
+  requestAnimationFrame(() => {
+    const ok = apply();
+    // Fallback: if chessboard redraws again (animations, etc), reapply once
+    if (!ok) return;
+    setTimeout(apply, 0);
+  });
 }
+
 /* ============================================================================
    ===== UI MODE + PIECES =====================================================
    ============================================================================ */
@@ -1184,12 +1178,12 @@ function onDrop(source, target) {
 }
 
 function onSnapEnd() {
-  board.position(game.fen());
+  board.position(game.fen(), true);
 
   // IMPORTANT: board.position() rebuilds DOM and clears custom classes.
   // Re-apply our overlays AFTER the redraw:
   if (lastMove) highlightLastMove(lastMove.from, lastMove.to);
-  highlightCheck();
+  board.position(game.fen(), true);
 
   if (engineReplyRequested) {
     engineReplyRequested = false; // prevents double-fire
