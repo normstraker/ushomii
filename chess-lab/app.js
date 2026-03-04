@@ -21,6 +21,8 @@ let initialOrientation = "white";
 // Click-to-move selection
 let selectedSquare = null;
 
+let lastMove = null; // { from, to }
+
 let analysisMode = false;
 
 // Stockfish / engine UI indicator
@@ -594,29 +596,77 @@ function highlightLastMove(from, to) {
 
 function clearCheckHighlight() {
   $("#board .square-55d63").removeClass("square-check square-checkmate");
+  // ALSO clear any king-piece glow on the pieces layer
+  $("#board .piece-417db").removeClass("piece-check piece-checkmate");
 }
-function highlightCheck() {
-  clearCheckHighlight();
-  if (!game.isCheck()) return;
 
-  const inMate = game.isCheckmate();
-  const turn = game.turn(); // side currently in check
-  const boardState = game.board();
+function findKingSquareFromFen(fen, color /* 'w'|'b' */) {
+  const placement = String(fen).split(" ")[0];
+  const ranks = placement.split("/");
+  const target = color === "w" ? "K" : "k";
 
-  for (let rank = 0; rank < 8; rank++) {
-    for (let file = 0; file < 8; file++) {
-      const piece = boardState[rank][file];
-      if (piece && piece.type === "k" && piece.color === turn) {
-        const square = "abcdefgh"[file] + (8 - rank);
-        $(`#board .square-55d63[data-square="${square}"]`).addClass(
-          inMate ? "square-checkmate" : "square-check",
-        );
-        return;
+  for (let r = 0; r < 8; r++) {
+    let file = 0;
+    for (const ch of ranks[r]) {
+      if (/\d/.test(ch)) {
+        file += Number(ch);
+      } else {
+        if (ch === target) return "abcdefgh"[file] + (8 - r);
+        file += 1;
       }
     }
   }
+  return null;
 }
 
+function highlightCheck() {
+  clearCheckHighlight();
+
+  const inCheck =
+    (typeof game.isCheck === "function" && game.isCheck()) ||
+    (typeof game.inCheck === "function" && game.inCheck()) ||
+    (typeof game.in_check === "function" && game.in_check()) ||
+    false;
+
+  if (!inCheck) return;
+
+  const inMate =
+    (typeof game.isCheckmate === "function" && game.isCheckmate()) ||
+    (typeof game.isCheckMate === "function" && game.isCheckMate()) ||
+    (typeof game.in_checkmate === "function" && game.in_checkmate()) ||
+    false;
+
+  const turn = game.turn();
+  const kingSq = findKingSquareFromFen(game.fen(), turn);
+  if (!kingSq) return;
+
+  console.log("[highlightCheck]", {
+    inCheck,
+    inMate,
+    turn,
+    kingSq,
+    fen: game.fen(),
+    elFound: !!document.querySelector(
+      `#board .square-55d63[data-square="${kingSq}"]`,
+    ),
+  });
+
+  const el = document.querySelector(
+    `#board .square-55d63[data-square="${kingSq}"]`,
+  );
+  if (!el) return;
+
+  // Square layer (nice, but can be hidden by pieces)
+  el.classList.add(inMate ? "square-checkmate" : "square-check");
+
+  // Pieces layer (this is the visible fix)
+  const pieceEl = document.querySelector(
+    `#board .piece-417db.square-${kingSq}`,
+  );
+  if (pieceEl) {
+    pieceEl.classList.add(inMate ? "piece-checkmate" : "piece-check");
+  }
+}
 /* ============================================================================
    ===== UI MODE + PIECES =====================================================
    ============================================================================ */
@@ -897,8 +947,9 @@ function getEngineCandidates({
     };
 
     sf.postMessage(`setoption name MultiPV value ${multiPV}`);
-    const fen = arguments[0]?.fenOverride || game.fen();
-    sf.postMessage(`position fen ${fenOverride || game.fen()}`);
+
+    const fen = fenOverride || game.fen();
+    sf.postMessage(`position fen ${fen}`);
     sf.postMessage(`go movetime ${movetimeMs}`);
   });
 }
@@ -908,29 +959,75 @@ function getEngineCandidates({
    ============================================================================ */
 
 function updateStatus() {
+  // chess.js compatibility: different builds use different method names
+  const inCheck =
+    typeof game.isCheck === "function"
+      ? game.isCheck()
+      : typeof game.inCheck === "function"
+        ? game.inCheck()
+        : typeof game.in_check === "function"
+          ? game.in_check()
+          : false;
+
+  const inMate =
+    typeof game.isCheckmate === "function"
+      ? game.isCheckmate()
+      : typeof game.isCheckMate === "function"
+        ? game.isCheckMate()
+        : typeof game.in_checkmate === "function"
+          ? game.in_checkmate()
+          : false;
+
+  const isDraw =
+    typeof game.isDraw === "function"
+      ? game.isDraw()
+      : typeof game.inDraw === "function"
+        ? game.inDraw()
+        : typeof game.in_draw === "function"
+          ? game.in_draw()
+          : false;
+
+  const isOver =
+    typeof game.isGameOver === "function"
+      ? game.isGameOver()
+      : typeof game.game_over === "function"
+        ? game.game_over()
+        : inMate || isDraw;
+
   let status = "";
   const turn = game.turn() === "w" ? "White" : "Black";
 
-  if (game.isCheckmate()) {
+  if (inMate) {
     status = `Checkmate. ${turn} to move — but it's over.`;
-  } else if (game.isDraw()) {
+  } else if (isDraw) {
     status = "Draw.";
   } else {
     status = `${turn} to move.`;
-    if (game.isCheck()) status += " (Check)";
+    if (inCheck) status += " (Check)";
   }
 
-  $status.textContent = status;
+  // IMPORTANT: don't wipe out the engine indicator span each update.
+  // So set the text node safely:
+  if ($status) {
+    // If you have engine-inline appended, preserve it.
+    // We'll set a text node as the first child.
+    if (!$status.firstChild || $status.firstChild.nodeType !== Node.TEXT_NODE) {
+      $status.insertBefore(document.createTextNode(""), $status.firstChild);
+    }
+    $status.firstChild.nodeValue = status;
+  }
+
   ensureEngineInline();
 
   // Show Review button only when game is over
   if ($reviewGame) {
-    $reviewGame.style.display = game.isGameOver() ? "" : "none";
+    $reviewGame.style.display = isOver ? "" : "none";
   }
 
   // Keep review card hidden unless actively reviewing
   if (!reviewMode) setReviewOpen(false);
 
+  // Re-apply red highlight (uses compatibility logic below)
   highlightCheck();
 }
 
@@ -1027,6 +1124,8 @@ async function maybeEnginePlays() {
 
     updateStatus();
     renderMoveList();
+
+    lastMove = { from, to };
     highlightLastMove(from, to);
 
     saveFenToStorage();
@@ -1068,6 +1167,8 @@ function onDrop(source, target) {
 
   updateStatus();
   renderMoveList();
+
+  lastMove = { from: source, to: target };
   highlightLastMove(source, target);
 
   // Persist after human drag move
@@ -1084,6 +1185,11 @@ function onDrop(source, target) {
 
 function onSnapEnd() {
   board.position(game.fen());
+
+  // IMPORTANT: board.position() rebuilds DOM and clears custom classes.
+  // Re-apply our overlays AFTER the redraw:
+  if (lastMove) highlightLastMove(lastMove.from, lastMove.to);
+  highlightCheck();
 
   if (engineReplyRequested) {
     engineReplyRequested = false; // prevents double-fire
@@ -1227,6 +1333,8 @@ $undo.addEventListener("click", () => {
 
   // After undo it's always human's turn in your logic -> safe to analyze
   if (analysisMode) requestAnalysisNow();
+
+  lastMove = null; // simplest; or recompute from history if you want
 });
 
 $flip.addEventListener("click", () => {
@@ -1292,6 +1400,8 @@ function startNewGame() {
       requestAnalysisNow();
     }
   }, 0);
+
+  lastMove = null;
 }
 
 function syncDraggableMode() {
@@ -1397,6 +1507,8 @@ function initBoard() {
     board.position(game.fen(), true);
     updateStatus();
     renderMoveList();
+
+    lastMove = { from: selectedSquare, to: square };
     highlightLastMove(selectedSquare, square);
 
     saveFenToStorage();
@@ -2139,6 +2251,8 @@ function gotoReviewPly(index) {
   clearHighlights();
   clearLastMoveHighlight();
   clearCheckHighlight();
+
+  highlightCheck();
 
   updateReviewStatusLine();
   drawEvalGraph(review.plys, review.evals, review.currentPly);
