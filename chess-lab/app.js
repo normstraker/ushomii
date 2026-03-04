@@ -1,10 +1,7 @@
 console.log("app.js loaded");
 
-/* global Chess, Chessboard */
-
-/* ============================================================================
-   ===== GLOBAL STATE =========================================================
-   ============================================================================ */
+/* ================================================================================= GLOBAL STATE =========================================================
+============================================================================ */
 
 let game = new Chess();
 let board = null;
@@ -617,34 +614,43 @@ function findKingSquareFromFen(fen, color /* 'w'|'b' */) {
   return null;
 }
 
-function highlightCheck() {
-  // chess.js compatibility
-  const inCheck =
-    (typeof game.isCheck === "function" && game.isCheck()) ||
-    (typeof game.inCheck === "function" && game.inCheck()) ||
-    (typeof game.in_check === "function" && game.in_check()) ||
-    false;
+function getCheckStateFromFen(fen) {
+  try {
+    const g = new Chess();
+    g.load(fen);
 
-  const inMate =
-    (typeof game.isCheckmate === "function" && game.isCheckmate()) ||
-    (typeof game.isCheckMate === "function" && game.isCheckMate()) ||
-    (typeof game.in_checkmate === "function" && game.in_checkmate()) ||
-    false;
+    const inCheck =
+      (typeof g.isCheck === "function" && g.isCheck()) ||
+      (typeof g.inCheck === "function" && g.inCheck()) ||
+      (typeof g.in_check === "function" && g.in_check()) ||
+      false;
 
-  // Always clear first (but do it AFTER a redraw-safe tick too)
-  const fen = game.fen();
-  const turn = game.turn();
+    const inMate =
+      (typeof g.isCheckmate === "function" && g.isCheckmate()) ||
+      (typeof g.isCheckMate === "function" && g.isCheckMate()) ||
+      (typeof g.in_checkmate === "function" && g.in_checkmate()) ||
+      false;
+
+    return { inCheck, inMate, turn: g.turn() };
+  } catch (_) {
+    return { inCheck: false, inMate: false, turn: "w" };
+  }
+}
+
+function highlightCheck(fenOverride = null) {
+  const fen = fenOverride || game.fen();
+
+  const { inCheck, inMate, turn } = getCheckStateFromFen(fen);
   const kingSq = findKingSquareFromFen(fen, turn);
+
   if (!inCheck || !kingSq) {
     clearCheckHighlight();
     return;
   }
 
   const apply = () => {
-    // Clear any previous red
     clearCheckHighlight();
 
-    // Chessboard.js squares are like: .square-e3
     const el = document.querySelector(`#board .square-${kingSq}`);
     if (!el) return false;
 
@@ -652,10 +658,8 @@ function highlightCheck() {
     return true;
   };
 
-  // Run after DOM repaint (prevents chessboard.js redraw from wiping it)
   requestAnimationFrame(() => {
     const ok = apply();
-    // Fallback: if chessboard redraws again (animations, etc), reapply once
     if (!ok) return;
     setTimeout(apply, 0);
   });
@@ -1180,14 +1184,13 @@ function onDrop(source, target) {
 function onSnapEnd() {
   board.position(game.fen(), true);
 
-  // IMPORTANT: board.position() rebuilds DOM and clears custom classes.
-  // Re-apply our overlays AFTER the redraw:
+  // Re-apply overlays AFTER the redraw:
   if (lastMove) highlightLastMove(lastMove.from, lastMove.to);
-  board.position(game.fen(), true);
+  highlightCheck(); // uses game.fen()
 
   if (engineReplyRequested) {
-    engineReplyRequested = false; // prevents double-fire
-    scheduleEngineReplyAfterSnap(); // analysisMode => instant (0ms)
+    engineReplyRequested = false;
+    scheduleEngineReplyAfterSnap();
   }
 }
 
@@ -2245,9 +2248,7 @@ function gotoReviewPly(index) {
   clearHighlights();
   clearLastMoveHighlight();
   clearCheckHighlight();
-
-  highlightCheck();
-
+  highlightCheck(fen);
   updateReviewStatusLine();
   drawEvalGraph(review.plys, review.evals, review.currentPly);
   highlightCurrentReviewMoveRow();
