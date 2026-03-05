@@ -77,6 +77,7 @@ const $reviewToggle = document.getElementById("reviewToggle");
 const $reviewBody = document.getElementById("reviewBody");
 const $reviewStatus = document.getElementById("reviewStatus");
 const $evalGraph = document.getElementById("evalGraph");
+const $evalTooltip = document.getElementById("evalTooltip");
 const $reviewPrev = document.getElementById("reviewPrev");
 const $reviewNext = document.getElementById("reviewNext");
 const $reviewExit = document.getElementById("reviewExit");
@@ -948,7 +949,7 @@ function getEngineCandidates({
         resolveAnalysis(partial);
       }
     };
-    
+
     sf.postMessage("ucinewgame");
     sf.postMessage(`setoption name MultiPV value ${multiPV}`);
 
@@ -2021,14 +2022,45 @@ function blunderGlyph(label) {
   return "";
 }
 
-function formatPvLineForUi(pvLine) {
+function formatPvLineForUi(pvLine, fenBefore) {
   if (!pvLine) return "—";
 
-  // PV can be long; show first ~10 plies
-  const parts = String(pvLine).trim().split(/\s+/).filter(Boolean);
-  const shown = parts.slice(0, 10);
-  const suffix = parts.length > shown.length ? " …" : "";
-  return shown.join(" ") + suffix;
+  try {
+    const g = new Chess();
+    g.load(fenBefore);
+
+    const parts = String(pvLine).trim().split(/\s+/).filter(Boolean);
+
+    const sanMoves = [];
+
+    for (let i = 0; i < parts.length; i++) {
+      const uci = parts[i];
+
+      const from = uci.slice(0, 2);
+      const to = uci.slice(2, 4);
+      const promo = uci.length > 4 ? uci[4] : undefined;
+
+      const mv = g.move({ from, to, promotion: promo || "q" });
+
+      if (!mv) break;
+
+      sanMoves.push(mv.san);
+    }
+
+    // Convert to move numbers
+    let out = "";
+    for (let i = 0; i < sanMoves.length; i++) {
+      if (i % 2 === 0) {
+        const moveNo = Math.floor(i / 2) + 1;
+        out += `${moveNo}. `;
+      }
+      out += sanMoves[i] + " ";
+    }
+
+    return out.trim();
+  } catch (err) {
+    return pvLine; // fallback to raw UCI if something fails
+  }
 }
 
 function updateBestLinePanel() {
@@ -2043,7 +2075,10 @@ function updateBestLinePanel() {
   // We stored bestPvLine during review analysis
   const e = review.evals?.[i];
   const bestMove = e?.bestMoveUci ? `Best: ${e.bestMoveUci}\n` : "";
-  const pv = e?.bestPvLine ? `PV: ${formatPvLineForUi(e.bestPvLine)}` : "PV: —";
+  const fenBefore = review.plys[i - 1]?.fen;
+  const pv = e?.bestPvLine
+    ? `PV: ${formatPvLineForUi(e.bestPvLine, fenBefore)}`
+    : "PV: —";
 
   $bestLine.textContent = bestMove + pv;
 }
@@ -2055,7 +2090,7 @@ function plyToMoveLabel(plyIndex) {
   const side = plyIndex % 2 === 1 ? "White" : "Black";
   return `Move ${moveNo} — ${side}`;
 }
-
+``
 function formatEvalHuman(povCp, mate) {
   if (mate !== null && mate !== undefined) {
     if (mate === 0) return "Checkmate";
@@ -2196,6 +2231,116 @@ function drawEvalGraph(plys, evals, currentIndex, blunders = []) {
       ctx.fill();
     }
   }
+}
+
+/* ============================================================================
+   ===== EVAL GRAPH HOVER + CLICK =============================================
+   Hover shows (Move N, Eval +x.x). Click jumps to that ply.
+   ============================================================================ */
+
+function clamp(n, lo, hi) {
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function formatEvalShort(povCp, mate) {
+  if (mate !== null && mate !== undefined) {
+    // Keep it compact for tooltip
+    const m = Number(mate);
+    if (!Number.isFinite(m)) return "Mate";
+    return m > 0 ? `M${m}` : `-M${Math.abs(m)}`;
+  }
+  const pawns = (Number(povCp) || 0) / 100;
+  const sign = pawns > 0 ? "+" : pawns < 0 ? "−" : "";
+  return `${sign}${Math.abs(pawns).toFixed(1)}`;
+}
+
+function plyIndexFromCanvasEvent(ev) {
+  if (!$evalGraph) return 0;
+
+  const rect = $evalGraph.getBoundingClientRect();
+  if (rect.width <= 0) return 0;
+
+  // clientX -> canvas internal X (handles CSS scaling)
+  const scaleX = $evalGraph.width / rect.width;
+  const x = (ev.clientX - rect.left) * scaleX;
+
+  // Must match your drawEvalGraph padding math:
+  // xs(i) = (i/(n-1))*(w-10) + 5
+  const w = $evalGraph.width;
+  const n = review?.evals?.length || 0;
+  if (n < 2) return 0;
+
+  const leftPad = 5;
+  const usable = w - 10;
+
+  const t = (x - leftPad) / usable;
+  const i = Math.round(t * (n - 1));
+  return clamp(i, 0, n - 1);
+}
+
+function showEvalTooltip(ev, plyIndex) {
+  if (!$evalTooltip) return;
+
+  const ply = review?.plys?.[plyIndex];
+  const e = review?.evals?.[plyIndex];
+
+  if (!ply || !e) {
+    $evalTooltip.style.display = "none";
+    return;
+  }
+
+  // “Move 17” (your request) is full-move number:
+  // plyIndex 1/2 -> move 1, plyIndex 33/34 -> move 17, etc.
+  const moveNo = plyIndex === 0 ? 0 : Math.ceil(plyIndex / 2);
+  const moveLabel = plyIndex === 0 ? "Start" : `Move ${moveNo}`;
+
+  const evalLabel = `Eval: ${formatEvalShort(e.povCp, e.mate)}`;
+
+  $evalTooltip.innerHTML = `
+    <div><strong>${moveLabel}</strong></div>
+    <div class="muted">${evalLabel}</div>
+  `;
+
+  // Position near cursor (fixed tooltip)
+  $evalTooltip.style.left = `${ev.clientX}px`;
+  $evalTooltip.style.top = `${ev.clientY}px`;
+  $evalTooltip.style.display = "block";
+}
+
+function hideEvalTooltip() {
+  if (!$evalTooltip) return;
+  $evalTooltip.style.display = "none";
+}
+
+function initEvalGraphInteractions() {
+  if (!$evalGraph) return;
+
+  // Nice UX: show it’s clickable
+  $evalGraph.style.cursor = "crosshair";
+
+  // Hover / move
+  $evalGraph.addEventListener("mousemove", ev => {
+    if (!reviewMode) return;
+    if (!review?.evals || review.evals.length < 2) return;
+
+    const i = plyIndexFromCanvasEvent(ev);
+    showEvalTooltip(ev, i);
+  });
+
+  // Leaving canvas hides tooltip
+  $evalGraph.addEventListener("mouseleave", () => {
+    hideEvalTooltip();
+  });
+
+  // Click jumps to that ply
+  $evalGraph.addEventListener("click", ev => {
+    if (!reviewMode) return;
+    if (!review?.evals || review.evals.length < 2) return;
+
+    const i = plyIndexFromCanvasEvent(ev);
+    hideEvalTooltip();
+    gotoReviewPly(i);
+  });
 }
 
 function renderCriticalList() {
@@ -2598,6 +2743,7 @@ function exitReview() {
   initBoard();
   initBoardResizeObserver();
   initMovesCollapse();
+  initEvalGraphInteractions();
 
   initThemeCollapse();
   initThemeControls();

@@ -383,6 +383,27 @@ body {
   background: rgba(255, 255, 255, 0.03);
 }
 
+/* Hover tooltip for eval graph */
+.eval-tooltip {
+  position: fixed; /* anchored to viewport so it won’t get clipped */
+  z-index: 9999;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.25;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  pointer-events: none; /* so mouse doesn’t “hit” the tooltip */
+  white-space: nowrap;
+  transform: translate(10px, 10px); /* offset from cursor */
+}
+
+.eval-tooltip .muted {
+  color: var(--muted);
+}
+
 #bestLine.best-line {
   border: 1px solid var(--border);
   border-radius: 12px;
