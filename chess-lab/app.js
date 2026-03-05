@@ -948,7 +948,8 @@ function getEngineCandidates({
         resolveAnalysis(partial);
       }
     };
-
+    
+    sf.postMessage("ucinewgame");
     sf.postMessage(`setoption name MultiPV value ${multiPV}`);
 
     const fen = fenOverride || game.fen();
