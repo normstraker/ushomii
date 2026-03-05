@@ -81,6 +81,7 @@ const $reviewPrev = document.getElementById("reviewPrev");
 const $reviewNext = document.getElementById("reviewNext");
 const $reviewExit = document.getElementById("reviewExit");
 const $criticalList = document.getElementById("criticalList");
+const $bestLine = document.getElementById("bestLine");
 
 /* ============================================================================
    ===== PERSISTENCE (FEN) ====================================================
@@ -724,6 +725,8 @@ function parseInfoLine(line) {
   const depthMatch = line.match(/\bdepth\s+(\d+)\b/);
   const mpvMatch = line.match(/\bmultipv\s+(\d+)\b/);
   const pvMatch = line.match(/\bpv\s+([a-h][1-8][a-h][1-8][qrbn]?)\b/);
+  const pvLineMatch = line.match(/\bpv\s+(.+)$/);
+  const pvLine = pvLineMatch ? pvLineMatch[1].trim() : null;
   const cpMatch = line.match(/\bscore\s+cp\s+(-?\d+)\b/);
   const mateMatch = line.match(/\bscore\s+mate\s+(-?\d+)\b/);
 
@@ -733,6 +736,7 @@ function parseInfoLine(line) {
     depth: Number(depthMatch[1]),
     multipv: Number(mpvMatch[1]),
     moveUci: pvMatch[1],
+    pvLine,
     scoreCp: cpMatch ? Number(cpMatch[1]) : null,
     scoreMate: mateMatch ? Number(mateMatch[1]) : null,
   };
@@ -886,6 +890,7 @@ function getEngineCandidates({
   multiPV = 5,
   targetDepth = 10,
   fenOverride = null,
+  movesUci = "",
 } = {}) {
   return new Promise(async resolve => {
     if (!sf) {
@@ -947,7 +952,11 @@ function getEngineCandidates({
     sf.postMessage(`setoption name MultiPV value ${multiPV}`);
 
     const fen = fenOverride || game.fen();
-    sf.postMessage(`position fen ${fen}`);
+    if (movesUci && String(movesUci).trim().length > 0) {
+      sf.postMessage(`position fen ${fen} moves ${String(movesUci).trim()}`);
+    } else {
+      sf.postMessage(`position fen ${fen}`);
+    }
     sf.postMessage(`go movetime ${movetimeMs}`);
   });
 }
@@ -1880,6 +1889,41 @@ async function analyzeFenOnce(fen, opts = {}) {
   };
 }
 
+async function analyzeMoveQuality(fenBefore, playedUci, opts = {}) {
+  const { movetimeMs = 140, targetDepth = 10 } = opts;
+
+  // 1) Best move eval from fenBefore
+  const bestCandidates = await getEngineCandidates({
+    movetimeMs,
+    multiPV: 1,
+    targetDepth,
+    fenOverride: fenBefore,
+  });
+
+  const best = bestCandidates?.[0] || null;
+
+  // 2) Played move eval: evaluate the position after "playedUci"
+  const playedCandidates = await getEngineCandidates({
+    movetimeMs,
+    multiPV: 1,
+    targetDepth,
+    fenOverride: fenBefore,
+    movesUci: playedUci || "",
+  });
+
+  const played = playedCandidates?.[0] || null;
+
+  return {
+    bestMoveUci: best?.moveUci ?? null,
+    bestCp: best?.scoreCp ?? 0,
+    bestMate: best?.scoreMate ?? null,
+    bestPvLine: best?.pvLine ?? null,
+
+    playedCp: played?.scoreCp ?? 0,
+    playedMate: played?.scoreMate ?? null,
+  };
+}
+
 function fenTurn(fen) {
   // fen: ".... w ..."
   const parts = String(fen).split(" ");
@@ -1927,6 +1971,80 @@ function computeBlundersFromEvals(plys, evals) {
   }
 
   return out.sort((a, b) => b.drop - a.drop);
+}
+
+function computeTrueBlundersFromBestVsPlayed(plys, evals) {
+  const out = [];
+
+  // thresholds (cp) — tweak later
+  const TH_INACC = 120;
+  const TH_MIST = 250;
+  const TH_BLUN = 450;
+
+  for (let i = 1; i < plys.length; i++) {
+    const e = evals[i];
+    if (!e) continue;
+
+    const fenBefore = plys[i - 1].fen;
+    const fenAfter = plys[i].fen;
+
+    // Convert both evals into White POV so they’re comparable
+    const bestPov = toWhitePovCp(e.bestCp ?? 0, e.bestMate ?? null, fenBefore);
+    const playedPov = toWhitePovCp(e.cp ?? 0, e.mate ?? null, fenAfter);
+
+    // mover is the side who played move i
+    const mover = plys[i].turn === "w" ? "b" : "w";
+
+    // From mover POV, compute how much worse played is vs best.
+    let drop = mover === "w" ? bestPov - playedPov : playedPov - bestPov;
+    drop = Math.round(drop);
+
+    if (drop >= TH_INACC) {
+      const label =
+        drop >= TH_BLUN
+          ? "Blunder"
+          : drop >= TH_MIST
+            ? "Mistake"
+            : "Inaccuracy";
+      out.push({ plyIndex: i, drop, label });
+    }
+  }
+
+  return out.sort((a, b) => b.drop - a.drop);
+}
+
+function blunderGlyph(label) {
+  if (label === "Blunder") return "??";
+  if (label === "Mistake") return "?!";
+  if (label === "Inaccuracy") return "!?";
+  return "";
+}
+
+function formatPvLineForUi(pvLine) {
+  if (!pvLine) return "—";
+
+  // PV can be long; show first ~10 plies
+  const parts = String(pvLine).trim().split(/\s+/).filter(Boolean);
+  const shown = parts.slice(0, 10);
+  const suffix = parts.length > shown.length ? " …" : "";
+  return shown.join(" ") + suffix;
+}
+
+function updateBestLinePanel() {
+  if (!$bestLine) return;
+
+  const i = review.currentPly;
+  if (i <= 0) {
+    $bestLine.textContent = "—";
+    return;
+  }
+
+  // We stored bestPvLine during review analysis
+  const e = review.evals?.[i];
+  const bestMove = e?.bestMoveUci ? `Best: ${e.bestMoveUci}\n` : "";
+  const pv = e?.bestPvLine ? `PV: ${formatPvLineForUi(e.bestPvLine)}` : "PV: —";
+
+  $bestLine.textContent = bestMove + pv;
 }
 
 // PASTE STARTS HERE
@@ -1999,7 +2117,7 @@ function explainSanBasic(san) {
   return `${piece} to ${toSq}${check}`;
 }
 
-function drawEvalGraph(plys, evals, currentIndex) {
+function drawEvalGraph(plys, evals, currentIndex, blunders = []) {
   if (!$evalGraph) return;
   const ctx = $evalGraph.getContext("2d");
   if (!ctx) return;
@@ -2054,6 +2172,29 @@ function drawEvalGraph(plys, evals, currentIndex) {
   ctx.moveTo(cx, 5);
   ctx.lineTo(cx, h - 5);
   ctx.stroke();
+
+  // Blunder markers (dots)
+  if (Array.isArray(blunders) && blunders.length > 0) {
+    for (const b of blunders) {
+      const i = b.plyIndex;
+      if (i < 0 || i >= evals.length) continue;
+
+      const x = xs(i);
+      const y = ys(evals[i]?.povCp ?? 0);
+
+      const r = b.label === "Blunder" ? 4 : b.label === "Mistake" ? 3 : 2;
+
+      ctx.beginPath();
+      ctx.fillStyle =
+        b.label === "Blunder"
+          ? "rgba(255,0,0,0.9)"
+          : b.label === "Mistake"
+            ? "rgba(255,165,0,0.85)"
+            : "rgba(0,200,255,0.75)";
+      ctx.arc(x, y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 }
 
 function renderCriticalList() {
@@ -2074,7 +2215,8 @@ function renderCriticalList() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = b.label === "Blunder" ? "blunder" : "";
-    btn.textContent = `Move ${ply.moveNumber}${b.plyIndex % 2 === 1 ? " (White)" : " (Black)"}: ${ply.san}`;
+    const glyph = blunderGlyph(b.label);
+    btn.textContent = `Move ${ply.moveNumber}${b.plyIndex % 2 === 1 ? " (White)" : " (Black)"}: ${ply.san}${glyph ? " " + glyph : ""}`;
     const tag = document.createElement("span");
     tag.className = "tag";
     tag.textContent = `${b.label} (−${b.drop}cp)`;
@@ -2125,7 +2267,9 @@ function renderReviewMovesList() {
 
       const san = document.createElement("div");
       san.className = "review-move-san";
-      san.textContent = whiteSan || "—";
+      const w = blMap.get(whitePly);
+      const g = w ? blunderGlyph(w.label) : "";
+      san.textContent = (whiteSan || "—") + (g ? ` ${g}` : "");
 
       const tag = document.createElement("div");
       tag.className = "review-tag";
@@ -2169,7 +2313,9 @@ function renderReviewMovesList() {
 
       const san = document.createElement("div");
       san.className = "review-move-san";
-      san.textContent = blackSan || "—";
+      const b = blMap.get(blackPly);
+      const g = b ? blunderGlyph(b.label) : "";
+      san.textContent = (blackSan || "—") + (g ? ` ${g}` : "");
 
       const tag = document.createElement("div");
       tag.className = "review-tag";
@@ -2250,7 +2396,11 @@ function gotoReviewPly(index) {
   clearCheckHighlight();
   highlightCheck(fen);
   updateReviewStatusLine();
-  drawEvalGraph(review.plys, review.evals, review.currentPly);
+
+  const stable = review.evals.map(e => e || { povCp: 0, mate: null, cp: 0 });
+  drawEvalGraph(review.plys, stable, review.currentPly, review.blunders);
+
+  updateBestLinePanel();
   highlightCurrentReviewMoveRow();
 }
 
@@ -2284,41 +2434,106 @@ async function startPostGameReview() {
   if ($criticalList) $criticalList.innerHTML = "";
   drawEvalGraph(review.plys, [], 0);
 
-  // Analyze each position (ply) quickly
+  // Analyze each ply, but compute "true blunder" using best-vs-played from fen BEFORE the move.
   for (let i = 0; i < review.plys.length; i++) {
-    // If user exits review while running
     if (!reviewMode) break;
 
-    const fen = review.plys[i].fen;
-    const r = await analyzeFenOnce(fen, { movetimeMs: 140, targetDepth: 10 });
+    // ply 0 is start position
+    if (i === 0) {
+      const fen0 = review.plys[0].fen;
+      const r0 = await analyzeFenOnce(fen0, {
+        movetimeMs: 140,
+        targetDepth: 10,
+      });
+      const pov0 = toWhitePovCp(r0.cp, r0.mate, fen0);
+      review.evals[0] = { cp: r0.cp, mate: r0.mate, povCp: pov0 };
+      continue;
+    }
 
-    const povCp = toWhitePovCp(r.cp, r.mate, fen);
+    const fenBefore = review.plys[i - 1].fen;
+    const fenAfter = review.plys[i].fen;
+    const playedUci = review.plys[i].uci;
+
+    const q = await analyzeMoveQuality(fenBefore, playedUci, {
+      movetimeMs: 140,
+      targetDepth: 10,
+    });
+
+    // "After" eval stored for this ply, plus best-move info for UI
+    const povAfter = toWhitePovCp(q.playedCp, q.playedMate, fenAfter);
 
     review.evals[i] = {
-      cp: r.cp,
-      mate: r.mate,
-      povCp: povCp,
+      cp: q.playedCp,
+      mate: q.playedMate,
+      povCp: povAfter,
+
+      bestMoveUci: q.bestMoveUci,
+      bestPvLine: q.bestPvLine,
+      bestCp: q.bestCp,
+      bestMate: q.bestMate,
     };
 
-    // Live update graph every few points
+    // Live update (stable indexing)
     if (i % 4 === 0 || i === review.plys.length - 1) {
-      drawEvalGraph(
-        review.plys,
-        review.evals.filter(Boolean),
-        review.currentPly,
+      const stable = review.evals.map(
+        e => e || { povCp: 0, mate: null, cp: 0 },
       );
+      drawEvalGraph(review.plys, stable, review.currentPly, review.blunders);
     }
   }
 
-  // Compute blunders once evals exist
-  if (review.evals.every(Boolean)) {
-    review.blunders = computeBlundersFromEvals(review.plys, review.evals);
-  } else {
-    // Partial run (user exited early) — compute with what we have
-    const partialEvals = review.evals.map((e, idx) =>
-      e ? e : { povCp: 0, mate: null, cp: 0 },
-    );
-    review.blunders = computeBlundersFromEvals(review.plys, partialEvals);
+  // Compute TRUE blunders (best vs played)
+  const stableEvals = review.evals.map(
+    e => e || { povCp: 0, mate: null, cp: 0 },
+  );
+  review.blunders = computeTrueBlundersFromBestVsPlayed(
+    review.plys,
+    stableEvals,
+  );
+
+  function computeTrueBlundersFromBestVsPlayed(plys, evals) {
+    const out = [];
+
+    // thresholds (cp) — tweak later
+    const TH_INACC = 120;
+    const TH_MIST = 250;
+    const TH_BLUN = 450;
+
+    for (let i = 1; i < plys.length; i++) {
+      const e = evals[i];
+      if (!e) continue;
+
+      const fenBefore = plys[i - 1].fen;
+
+      const bestPov = toWhitePovCp(
+        e.bestCp ?? 0,
+        e.bestMate ?? null,
+        fenBefore,
+      );
+      const playedPov = toWhitePovCp(e.cp ?? 0, e.mate ?? null, plys[i].fen);
+
+      // mover is the side who played move i
+      const mover = plys[i].turn === "w" ? "b" : "w";
+
+      // From mover POV, compute how much worse played is vs best.
+      // If mover is White: worse means playedPov < bestPov  => drop = bestPov - playedPov
+      // If mover is Black: worse means playedPov > bestPov  => drop = playedPov - bestPov
+      let drop = mover === "w" ? bestPov - playedPov : playedPov - bestPov;
+
+      drop = Math.round(drop);
+
+      if (drop >= TH_INACC) {
+        const label =
+          drop >= TH_BLUN
+            ? "Blunder"
+            : drop >= TH_MIST
+              ? "Mistake"
+              : "Inaccuracy";
+        out.push({ plyIndex: i, drop, label });
+      }
+    }
+
+    return out.sort((a, b) => b.drop - a.drop);
   }
 
   renderCriticalList();

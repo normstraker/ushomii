@@ -46,7 +46,7 @@
               id="opponentToggle"
               type="button"
             >
-              <span>Opponent Strength</span>
+              <span>Game Play Settings</span>
               <span class="chev" id="opponentChev">▸</span>
             </button>
 
@@ -66,7 +66,7 @@
               />
 
               <label class="label-row" for="blunder">
-                <span>Blunder</span>
+                <span>Blunder Frequency</span>
                 <span class="value" id="blunderValue">0</span>
               </label>
 
@@ -154,6 +154,11 @@
                 height="120"
                 style="width: 100%; height: auto"
               ></canvas>
+
+              <div class="hint" style="margin-top: 10px">
+                Best line (engine)
+              </div>
+              <div id="bestLine" class="best-line">—</div>
 
               <div class="row">
                 <button id="reviewPrev" type="button">◂ Prev</button>
