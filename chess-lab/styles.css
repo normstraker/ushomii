@@ -886,6 +886,23 @@ html[data-ui="light"] select option {
   border: 1px solid var(--border);
 }
 
+.review-tag[data-drop]:hover::after {
+  content: attr(data-drop);
+  position: absolute;
+  bottom: 120%;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 10;
+}
+
 .review-tag.blunder {
   border-color: rgba(255, 0, 0, 0.55);
 }
@@ -896,6 +913,14 @@ html[data-ui="light"] select option {
 
 .review-tag.inaccuracy {
   border-color: rgba(0, 200, 255, 0.45);
+}
+
+.review-tag.best {
+  border-color: rgba(0, 255, 120, 0.55);
+}
+
+.review-tag.good {
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 #reviewCard.is-open .chev {

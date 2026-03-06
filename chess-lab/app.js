@@ -2063,6 +2063,24 @@ function formatPvLineForUi(pvLine, fenBefore) {
   }
 }
 
+function uciToSanFromFen(uciMove, fenBefore) {
+  if (!uciMove || !fenBefore) return null;
+
+  try {
+    const g = new Chess();
+    g.load(fenBefore);
+
+    const from = uciMove.slice(0, 2);
+    const to = uciMove.slice(2, 4);
+    const promo = uciMove.length > 4 ? uciMove[4] : undefined;
+
+    const mv = g.move({ from, to, promotion: promo || "q" });
+    return mv?.san ?? null;
+  } catch (_) {
+    return null;
+  }
+}
+
 function updateBestLinePanel() {
   if (!$bestLine) return;
 
@@ -2074,8 +2092,11 @@ function updateBestLinePanel() {
 
   // We stored bestPvLine during review analysis
   const e = review.evals?.[i];
-  const bestMove = e?.bestMoveUci ? `Best: ${e.bestMoveUci}\n` : "";
   const fenBefore = review.plys[i - 1]?.fen;
+  const bestSan = e?.bestMoveUci
+    ? uciToSanFromFen(e.bestMoveUci, fenBefore)
+    : null;
+  const bestMove = e?.bestMoveUci ? `Best: ${bestSan || e.bestMoveUci}\n` : "";
   const pv = e?.bestPvLine
     ? `PV: ${formatPvLineForUi(e.bestPvLine, fenBefore)}`
     : "PV: —";
@@ -2090,7 +2111,7 @@ function plyToMoveLabel(plyIndex) {
   const side = plyIndex % 2 === 1 ? "White" : "Black";
   return `Move ${moveNo} — ${side}`;
 }
-``
+``;
 function formatEvalHuman(povCp, mate) {
   if (mate !== null && mate !== undefined) {
     if (mate === 0) return "Checkmate";
@@ -2382,11 +2403,50 @@ function buildBlunderIndexMap() {
   return map;
 }
 
+function buildBestMoveIndexMap() {
+  // plyIndex -> bestMoveUci (string)
+  const map = new Map();
+  const evals = review?.evals || [];
+  for (let i = 1; i < evals.length; i++) {
+    const uci = evals[i]?.bestMoveUci;
+    if (uci) map.set(i, uci);
+  }
+  return map;
+}
+
+function computeDropVsBestForPly(plyIndex) {
+  // Returns drop in centipawns from the mover’s POV (0 = perfect).
+  // Uses review.evals[plyIndex] which stores:
+  //   cp/mate   = played result eval (after move)
+  //   bestCp/bestMate = best move eval (from position before move)
+  if (!review?.evals?.[plyIndex] || !review?.plys?.[plyIndex]) return null;
+  if (plyIndex <= 0) return null;
+
+  const e = review.evals[plyIndex];
+  const fenBefore = review.plys[plyIndex - 1]?.fen;
+  const fenAfter = review.plys[plyIndex]?.fen;
+  if (!fenBefore || !fenAfter) return null;
+
+  // Convert both to White POV so they’re comparable
+  const bestPov = toWhitePovCp(e.bestCp ?? 0, e.bestMate ?? null, fenBefore);
+  const playedPov = toWhitePovCp(e.cp ?? 0, e.mate ?? null, fenAfter);
+
+  // mover is the side who played plyIndex
+  const mover = review.plys[plyIndex].turn === "w" ? "b" : "w";
+
+  // From mover POV, "drop" means: how much worse played is than best
+  let drop = mover === "w" ? bestPov - playedPov : playedPov - bestPov;
+  drop = Math.max(0, Math.round(drop));
+
+  return drop;
+}
+
 function renderReviewMovesList() {
   if (!$reviewMoves) return;
   $reviewMoves.innerHTML = "";
 
   const blMap = buildBlunderIndexMap();
+  const bestMap = buildBestMoveIndexMap();
 
   // We want to display by full moves (white+black), but clickable by ply.
   // review.plys[0] is start; ply 1 is white move 1, ply 2 black move 1, etc.
@@ -2419,6 +2479,7 @@ function renderReviewMovesList() {
 
       const tag = document.createElement("div");
       tag.className = "review-tag";
+
       if (whiteTag) {
         const cls =
           whiteTag.label === "Blunder"
@@ -2434,8 +2495,28 @@ function renderReviewMovesList() {
               ? "?! Mistake"
               : "!? Inaccuracy";
       } else {
-        tag.textContent = "";
-        tag.style.borderColor = "transparent";
+        // No blunder label — check Best, otherwise maybe Good
+        const bestUci = bestMap.get(whitePly);
+        const playedUci = review.plys[whitePly]?.uci;
+
+        if (bestUci && playedUci === bestUci) {
+          tag.classList.add("best");
+          tag.textContent = "✓ Best";
+        } else {
+          const GOOD_MAX_DROP = 35; // <— tweak this number
+          const drop = computeDropVsBestForPly(whitePly);
+          if (drop !== null) {
+            tag.dataset.drop = `Drop: ${drop} cp`;
+          }
+
+          if (drop !== null && drop <= GOOD_MAX_DROP) {
+            tag.classList.add("good");
+            tag.textContent = "✓ Good";
+          } else {
+            tag.textContent = "";
+            tag.style.borderColor = "transparent";
+          }
+        }
       }
 
       row.appendChild(num);
@@ -2465,6 +2546,7 @@ function renderReviewMovesList() {
 
       const tag = document.createElement("div");
       tag.className = "review-tag";
+
       if (blackTag) {
         const cls =
           blackTag.label === "Blunder"
@@ -2480,8 +2562,27 @@ function renderReviewMovesList() {
               ? "?! Mistake"
               : "!? Inaccuracy";
       } else {
-        tag.textContent = "";
-        tag.style.borderColor = "transparent";
+        const bestUci = bestMap.get(blackPly);
+        const playedUci = review.plys[blackPly]?.uci;
+
+        if (bestUci && playedUci === bestUci) {
+          tag.classList.add("best");
+          tag.textContent = "✓ Best";
+        } else {
+          const GOOD_MAX_DROP = 35; // <— keep same value
+          const drop = computeDropVsBestForPly(blackPly);
+          if (drop !== null) {
+            tag.dataset.drop = `Drop: ${drop} cp`;
+          }
+
+          if (drop !== null && drop <= GOOD_MAX_DROP) {
+            tag.classList.add("good");
+            tag.textContent = "✓ Good";
+          } else {
+            tag.textContent = "";
+            tag.style.borderColor = "transparent";
+          }
+        }
       }
 
       row.appendChild(num);
