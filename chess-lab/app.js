@@ -33,6 +33,7 @@ let review = {
   evals: [], // [{ cp, mate, povCp }]
   blunders: [], // [{ plyIndex, drop, label }]
   currentPly: 0,
+  previewPly: null,
   running: false,
 };
 
@@ -2174,7 +2175,13 @@ function explainSanBasic(san) {
   return `${piece} to ${toSq}${check}`;
 }
 
-function drawEvalGraph(plys, evals, currentIndex, blunders = []) {
+function drawEvalGraph(
+  plys,
+  evals,
+  currentIndex,
+  blunders = [],
+  previewIndex = null,
+) {
   if (!$evalGraph) return;
   const ctx = $evalGraph.getContext("2d");
   if (!ctx) return;
@@ -2229,6 +2236,20 @@ function drawEvalGraph(plys, evals, currentIndex, blunders = []) {
   ctx.moveTo(cx, 5);
   ctx.lineTo(cx, h - 5);
   ctx.stroke();
+
+  // Preview marker (hover on move list)
+  if (previewIndex !== null && previewIndex !== undefined) {
+    const pi = Math.max(0, Math.min(evals.length - 1, previewIndex));
+    const px = xs(pi);
+    ctx.beginPath();
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.moveTo(px, 5);
+    ctx.lineTo(px, h - 5);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   // Blunder markers (dots)
   if (Array.isArray(blunders) && blunders.length > 0) {
@@ -2339,26 +2360,33 @@ function initEvalGraphInteractions() {
   // Nice UX: show it’s clickable
   $evalGraph.style.cursor = "crosshair";
 
-  // Hover / move
+  // Hover / move: preview board + show tooltip + dashed preview marker
   $evalGraph.addEventListener("mousemove", ev => {
     if (!reviewMode) return;
     if (!review?.evals || review.evals.length < 2) return;
 
     const i = plyIndexFromCanvasEvent(ev);
+
+    // Preview board/graph (dashed marker)
+    setPreviewPly(i);
+
+    // Tooltip follows cursor
     showEvalTooltip(ev, i);
   });
 
-  // Leaving canvas hides tooltip
+  // Leaving canvas: hide tooltip + clear preview (snap back to selected ply)
   $evalGraph.addEventListener("mouseleave", () => {
     hideEvalTooltip();
+    clearPreviewPly();
   });
 
-  // Click jumps to that ply
+  // Click: lock the ply
   $evalGraph.addEventListener("click", ev => {
     if (!reviewMode) return;
     if (!review?.evals || review.evals.length < 2) return;
 
     const i = plyIndexFromCanvasEvent(ev);
+
     hideEvalTooltip();
     gotoReviewPly(i);
   });
@@ -2465,6 +2493,7 @@ function renderReviewMovesList() {
       const whiteTag = blMap.get(whitePly);
       const row = document.createElement("div");
       row.className = "review-move-row";
+      row.dataset.ply = whitePly;
       row.dataset.ply = String(whitePly);
 
       const num = document.createElement("div");
@@ -2524,6 +2553,10 @@ function renderReviewMovesList() {
       row.appendChild(tag);
 
       row.addEventListener("click", () => gotoReviewPly(whitePly));
+      row.addEventListener("mouseenter", () => setPreviewPly(whitePly));
+      row.addEventListener("mouseleave", () => clearPreviewPly());
+      row.addEventListener("focus", () => setPreviewPly(whitePly));
+      row.addEventListener("blur", () => clearPreviewPly());
       $reviewMoves.appendChild(row);
     }
 
@@ -2536,6 +2569,7 @@ function renderReviewMovesList() {
 
       const num = document.createElement("div");
       num.className = "review-move-num";
+      row.dataset.ply = blackPly;
       num.textContent = ""; // blank for black row
 
       const san = document.createElement("div");
@@ -2590,6 +2624,10 @@ function renderReviewMovesList() {
       row.appendChild(tag);
 
       row.addEventListener("click", () => gotoReviewPly(blackPly));
+      row.addEventListener("mouseenter", () => setPreviewPly(blackPly));
+      row.addEventListener("mouseleave", () => clearPreviewPly());
+      row.addEventListener("focus", () => setPreviewPly(blackPly));
+      row.addEventListener("blur", () => clearPreviewPly());
       $reviewMoves.appendChild(row);
     }
   }
@@ -2631,6 +2669,65 @@ function updateReviewStatusLine() {
   $reviewStatus.textContent = `${moveLabel}: ${moveText} | Eval: ${evalText}`;
 }
 
+function redrawReviewGraph() {
+  const stable = review.evals.map(e => e || { povCp: 0, mate: null, cp: 0 });
+  drawEvalGraph(
+    review.plys,
+    stable,
+    review.currentPly,
+    review.blunders,
+    review.previewPly,
+  );
+}
+
+function setPreviewPly(index) {
+  if (!reviewMode) return;
+  index = Math.max(0, Math.min(review.plys.length - 1, index));
+  if (review.previewPly === index) return;
+  review.previewPly = index;
+  highlightPreviewMoveRow(index);
+
+  const fen = review.plys[index]?.fen;
+  if (fen && board) board.position(fen, true);
+
+  clearHighlights();
+  clearLastMoveHighlight();
+  clearCheckHighlight();
+  highlightCheck(fen);
+
+  redrawReviewGraph();
+}
+
+function clearPreviewPly() {
+  if (!reviewMode) return;
+  review.previewPly = null;
+  document
+    .querySelectorAll(".review-move-row.preview")
+    .forEach(r => r.classList.remove("preview"));
+
+  // Snap back to the currently selected ply
+  const fen = review.plys[review.currentPly]?.fen;
+  if (fen && board) board.position(fen, true);
+
+  clearHighlights();
+  clearLastMoveHighlight();
+  clearCheckHighlight();
+  highlightCheck(fen);
+
+  redrawReviewGraph();
+}
+
+function highlightPreviewMoveRow(plyIndex) {
+  const rows = document.querySelectorAll(".review-move-row");
+
+  rows.forEach(r => r.classList.remove("preview"));
+
+  const row = document.querySelector(
+    `.review-move-row[data-ply="${plyIndex}"]`,
+  );
+  if (row) row.classList.add("preview");
+}
+
 function gotoReviewPly(index) {
   index = Math.max(0, Math.min(review.plys.length - 1, index));
   review.currentPly = index;
@@ -2644,8 +2741,8 @@ function gotoReviewPly(index) {
   highlightCheck(fen);
   updateReviewStatusLine();
 
-  const stable = review.evals.map(e => e || { povCp: 0, mate: null, cp: 0 });
-  drawEvalGraph(review.plys, stable, review.currentPly, review.blunders);
+  review.previewPly = null;
+  redrawReviewGraph();
 
   updateBestLinePanel();
   highlightCurrentReviewMoveRow();
@@ -2725,7 +2822,13 @@ async function startPostGameReview() {
       const stable = review.evals.map(
         e => e || { povCp: 0, mate: null, cp: 0 },
       );
-      drawEvalGraph(review.plys, stable, review.currentPly, review.blunders);
+      drawEvalGraph(
+        review.plys,
+        stable,
+        review.currentPly,
+        review.blunders,
+        review.previewPly,
+      );
     }
   }
 
