@@ -1830,8 +1830,13 @@ function drawArrowUci(uci, kind = "best") {
   const ux = dx / len;
   const uy = dy / len;
 
-  const headLen = 5.5;
-  const headWidth = 3.4;
+  const isPlayed = kind === "played";
+
+  const headLen = isPlayed ? 6.2 : 5.5;
+  const headWidth = isPlayed ? 3.9 : 3.4;
+  const strokeWidth = isPlayed ? 2.8 : 2.2;
+  const startDotR = isPlayed ? 2.8 : 2.4;
+
   const endX = b.x - ux * 2.2;
   const endY = b.y - uy * 2.2;
   const shaftEndX = endX - ux * headLen;
@@ -1842,8 +1847,9 @@ function drawArrowUci(uci, kind = "best") {
   const rightX = endX - ux * headLen - -uy * headWidth;
   const rightY = endY - uy * headLen - ux * headWidth;
 
-  const stroke =
-    kind === "played" ? "rgba(255, 70, 70, 0.92)" : "rgba(0, 255, 120, 0.88)";
+  const stroke = isPlayed
+    ? "rgba(255, 70, 70, 0.92)"
+    : "rgba(0, 255, 120, 0.88)";
 
   const svgNS = "http://www.w3.org/2000/svg";
 
@@ -1853,7 +1859,7 @@ function drawArrowUci(uci, kind = "best") {
   line.setAttribute("x2", shaftEndX);
   line.setAttribute("y2", shaftEndY);
   line.setAttribute("stroke", stroke);
-  line.setAttribute("stroke-width", "2.2");
+  line.setAttribute("stroke-width", String(strokeWidth));
   line.setAttribute("stroke-linecap", "round");
 
   const head = document.createElementNS(svgNS, "polygon");
@@ -1866,7 +1872,7 @@ function drawArrowUci(uci, kind = "best") {
   const startDot = document.createElementNS(svgNS, "circle");
   startDot.setAttribute("cx", a.x);
   startDot.setAttribute("cy", a.y);
-  startDot.setAttribute("r", "2.4");
+  startDot.setAttribute("r", String(startDotR));
   startDot.setAttribute("fill", stroke);
 
   $boardArrowLayer.appendChild(line);
@@ -1893,9 +1899,22 @@ function renderReviewArrows() {
       : review.currentPly;
 
   const bestUci = getBestMoveForReviewPosition(shownPly);
-  if (!bestUci) return;
 
-  drawArrowUci(bestUci, "best");
+  let playedUci = null;
+  let mark = null;
+
+  if (shownPly > 0) {
+    playedUci = review?.plys?.[shownPly]?.uci ?? null;
+    mark = (review?.blunders || []).find(b => b.plyIndex === shownPly) || null;
+  }
+
+  if (bestUci) {
+    drawArrowUci(bestUci, "best");
+  }
+
+  if (playedUci && mark && playedUci !== bestUci) {
+    drawArrowUci(playedUci, "played");
+  }
 }
 
 /* ============================================================================
