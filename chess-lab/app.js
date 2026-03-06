@@ -1381,6 +1381,7 @@ function startNewGame() {
   clearHighlights();
   clearLastMoveHighlight();
   clearCheckHighlight();
+  clearReviewArrows();
   selectedSquare = null;
 
   updateStatus();
@@ -1764,6 +1765,140 @@ function isTouchDevice() {
 }
 
 /* ============================================================================
+   ===== REVIEW ARROWS ========================================================
+   ============================================================================ */
+
+const $boardArrowLayer = document.getElementById("boardArrowLayer");
+
+function clearReviewArrows() {
+  if (!$boardArrowLayer) return;
+  $boardArrowLayer.innerHTML = "";
+}
+
+function parseUciMove(uci) {
+  if (!uci || uci.length < 4) return null;
+  return {
+    from: uci.slice(0, 2),
+    to: uci.slice(2, 4),
+  };
+}
+
+function squareToArrowPoint(square) {
+  if (!square || square.length !== 2) return null;
+
+  const files = "abcdefgh";
+  const file = files.indexOf(square[0]);
+  const rank = Number(square[1]);
+
+  if (file < 0 || !rank) return null;
+
+  const orientation = board?.orientation?.() || "white";
+
+  let col, row;
+
+  if (orientation === "white") {
+    col = file;
+    row = 8 - rank;
+  } else {
+    col = 7 - file;
+    row = rank - 1;
+  }
+
+  const cell = 100 / 8;
+
+  return {
+    x: col * cell + cell / 2,
+    y: row * cell + cell / 2,
+  };
+}
+
+function drawArrowUci(uci, kind = "best") {
+  if (!$boardArrowLayer) return;
+
+  const move = parseUciMove(uci);
+  if (!move) return;
+
+  const a = squareToArrowPoint(move.from);
+  const b = squareToArrowPoint(move.to);
+  if (!a || !b) return;
+
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 0.001) return;
+
+  const ux = dx / len;
+  const uy = dy / len;
+
+  const headLen = 5.5;
+  const headWidth = 3.4;
+  const endX = b.x - ux * 2.2;
+  const endY = b.y - uy * 2.2;
+  const shaftEndX = endX - ux * headLen;
+  const shaftEndY = endY - uy * headLen;
+
+  const leftX = endX - ux * headLen + -uy * headWidth;
+  const leftY = endY - uy * headLen + ux * headWidth;
+  const rightX = endX - ux * headLen - -uy * headWidth;
+  const rightY = endY - uy * headLen - ux * headWidth;
+
+  const stroke =
+    kind === "played" ? "rgba(255, 70, 70, 0.92)" : "rgba(0, 255, 120, 0.88)";
+
+  const svgNS = "http://www.w3.org/2000/svg";
+
+  const line = document.createElementNS(svgNS, "line");
+  line.setAttribute("x1", a.x);
+  line.setAttribute("y1", a.y);
+  line.setAttribute("x2", shaftEndX);
+  line.setAttribute("y2", shaftEndY);
+  line.setAttribute("stroke", stroke);
+  line.setAttribute("stroke-width", "2.2");
+  line.setAttribute("stroke-linecap", "round");
+
+  const head = document.createElementNS(svgNS, "polygon");
+  head.setAttribute(
+    "points",
+    `${endX},${endY} ${leftX},${leftY} ${rightX},${rightY}`,
+  );
+  head.setAttribute("fill", stroke);
+
+  const startDot = document.createElementNS(svgNS, "circle");
+  startDot.setAttribute("cx", a.x);
+  startDot.setAttribute("cy", a.y);
+  startDot.setAttribute("r", "2.4");
+  startDot.setAttribute("fill", stroke);
+
+  $boardArrowLayer.appendChild(line);
+  $boardArrowLayer.appendChild(head);
+  $boardArrowLayer.appendChild(startDot);
+}
+
+function getBestMoveForReviewPosition(plyIndex) {
+  if (!review?.evals) return null;
+  if (plyIndex < 0) return null;
+
+  const nextEval = review.evals[plyIndex + 1];
+  return nextEval?.bestMoveUci ?? null;
+}
+
+function renderReviewArrows() {
+  clearReviewArrows();
+
+  if (!reviewMode) return;
+
+  const shownPly =
+    review.previewPly !== null && review.previewPly !== undefined
+      ? review.previewPly
+      : review.currentPly;
+
+  const bestUci = getBestMoveForReviewPosition(shownPly);
+  if (!bestUci) return;
+
+  drawArrowUci(bestUci, "best");
+}
+
+/* ============================================================================
    ===== POST-GAME REVIEW MODE ================================================
    ============================================================================ */
 
@@ -2112,7 +2247,7 @@ function plyToMoveLabel(plyIndex) {
   const side = plyIndex % 2 === 1 ? "White" : "Black";
   return `Move ${moveNo} — ${side}`;
 }
-``;
+
 function formatEvalHuman(povCp, mate) {
   if (mate !== null && mate !== undefined) {
     if (mate === 0) return "Checkmate";
@@ -2694,6 +2829,7 @@ function setPreviewPly(index) {
   clearLastMoveHighlight();
   clearCheckHighlight();
   highlightCheck(fen);
+  renderReviewArrows();
 
   redrawReviewGraph();
 }
@@ -2713,6 +2849,7 @@ function clearPreviewPly() {
   clearLastMoveHighlight();
   clearCheckHighlight();
   highlightCheck(fen);
+  renderReviewArrows();
 
   redrawReviewGraph();
 }
@@ -2742,6 +2879,7 @@ function gotoReviewPly(index) {
   updateReviewStatusLine();
 
   review.previewPly = null;
+  renderReviewArrows();
   redrawReviewGraph();
 
   updateBestLinePanel();
@@ -2896,6 +3034,7 @@ async function startPostGameReview() {
 function exitReview() {
   review.running = false;
   setReviewMode(false);
+  clearReviewArrows();
 
   // Return to the actual final game position
   if (board) board.position(game.fen(), true);
