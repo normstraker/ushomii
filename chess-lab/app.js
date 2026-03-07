@@ -587,6 +587,11 @@ function highlightMovesFrom(square) {
 function isHumanPieceOn(square) {
   const piece = game.get(square);
   if (!piece) return false;
+
+  if (review.tryAgainMode) {
+    return piece.color === game.turn();
+  }
+
   const humanColor = $playWhite.checked ? "w" : "b";
   return piece.color === humanColor;
 }
@@ -1318,7 +1323,13 @@ $reviewPrev?.addEventListener("click", () =>
 $reviewNext?.addEventListener("click", () =>
   gotoReviewPly(review.currentPly + 1),
 );
-$reviewTryAgain?.addEventListener("click", () => startTryAgainMode());
+$reviewTryAgain?.addEventListener("click", () => {
+  if (review.tryAgainMode) {
+    resetTryAgainPosition();
+  } else {
+    startTryAgainMode();
+  }
+});
 $reviewExit?.addEventListener("click", () => exitReview());
 
 // Collapsible Review card
@@ -1920,6 +1931,18 @@ function renderReviewArrows() {
 
   if (!reviewMode) return;
 
+  // In Try Again mode, show the engine best move from the training position.
+  if (review.tryAgainMode) {
+    const targetPly = review.tryAgainTargetPly;
+    if (!targetPly) return;
+
+    const bestUci = review?.evals?.[targetPly]?.bestMoveUci || null;
+    if (bestUci) {
+      drawArrowUci(bestUci, "best");
+    }
+    return;
+  }
+
   const shownPly =
     review.previewPly !== null && review.previewPly !== undefined
       ? review.previewPly
@@ -1952,6 +1975,38 @@ function getReviewMarkAtPly(plyIndex) {
   return (review?.blunders || []).find(b => b.plyIndex === plyIndex) || null;
 }
 
+function resetTryAgainPosition() {
+  if (!review.tryAgainMode) return;
+  if (!review.tryAgainFromFen) return;
+
+  selectedSquare = null;
+
+  try {
+    game.load(review.tryAgainFromFen);
+  } catch (_) {
+    return;
+  }
+
+  if (board) board.position(review.tryAgainFromFen, true);
+
+  clearHighlights();
+  clearLastMoveHighlight();
+  clearCheckHighlight();
+  highlightCheck(review.tryAgainFromFen);
+  renderReviewArrows();
+
+  if ($tryAgainStatus) {
+    $tryAgainStatus.style.display = "block";
+    $tryAgainStatus.textContent =
+      "Try again: make another move from this position.";
+  }
+
+  if ($reviewTryAgain) {
+    $reviewTryAgain.style.display = "";
+    $reviewTryAgain.textContent = "Reset Try";
+  }
+}
+
 function resetTryAgainUi() {
   review.tryAgainMode = false;
   review.tryAgainTargetPly = null;
@@ -1961,18 +2016,29 @@ function resetTryAgainUi() {
     $tryAgainStatus.style.display = "none";
     $tryAgainStatus.textContent = "—";
   }
+
+  if ($reviewTryAgain) {
+    $reviewTryAgain.textContent = "Try Again";
+  }
 }
 
 function refreshTryAgainAvailability() {
   if (!$reviewTryAgain) return;
 
-  if (!reviewMode || review.currentPly <= 0 || review.tryAgainMode) {
+  if (!reviewMode || review.currentPly <= 0) {
     $reviewTryAgain.style.display = "none";
+    return;
+  }
+
+  if (review.tryAgainMode) {
+    $reviewTryAgain.style.display = "";
+    $reviewTryAgain.textContent = "Reset Try";
     return;
   }
 
   const mark = getReviewMarkAtPly(review.currentPly);
   $reviewTryAgain.style.display = mark ? "" : "none";
+  $reviewTryAgain.textContent = "Try Again";
 }
 
 function startTryAgainMode() {
@@ -1990,6 +2056,13 @@ function startTryAgainMode() {
   review.tryAgainTargetPly = targetPly;
   review.tryAgainFromFen = fenBefore;
   review.previewPly = null;
+  selectedSquare = null;
+
+  try {
+    game.load(fenBefore);
+  } catch (_) {
+    return;
+  }
 
   if (board) {
     board.draggable = !$clickToMove?.checked;
@@ -2011,11 +2084,22 @@ function startTryAgainMode() {
       `${targetPly % 2 === 1 ? "White" : "Black"}.`;
   }
 
-  if ($reviewTryAgain) $reviewTryAgain.style.display = "none";
+  if ($reviewTryAgain) {
+    $reviewTryAgain.style.display = "";
+    $reviewTryAgain.textContent = "Reset Try";
+  }
 }
 
 function stopTryAgainMode() {
   resetTryAgainUi();
+  selectedSquare = null;
+
+  const finalFen = review?.plys?.[review.currentPly]?.fen;
+  if (finalFen) {
+    try {
+      game.load(finalFen);
+    } catch (_) {}
+  }
 
   if (board) {
     board.draggable = false;
@@ -2083,22 +2167,41 @@ async function handleTryAgainMoveAttempt(moveObj) {
     review.tryAgainMode = false;
     review.tryAgainTargetPly = null;
     review.tryAgainFromFen = null;
+    selectedSquare = null;
+
+    const finalFen = review?.plys?.[review.currentPly]?.fen;
+    if (finalFen) {
+      try {
+        game.load(finalFen);
+        if (board) board.position(finalFen, true);
+      } catch (_) {}
+    }
+
+    clearHighlights();
+    clearLastMoveHighlight();
+    clearCheckHighlight();
+    highlightCheck(finalFen);
+    renderReviewArrows();
     refreshTryAgainAvailability();
   } else {
-    // Reset board back to the training position
-    setTimeout(() => {
-      if (!review.tryAgainFromFen) return;
-      if (board) board.position(review.tryAgainFromFen, true);
-      try {
-        game.load(review.tryAgainFromFen);
-      } catch (_) {}
+    selectedSquare = null;
 
-      clearHighlights();
-      clearLastMoveHighlight();
-      clearCheckHighlight();
-      highlightCheck(review.tryAgainFromFen);
-      renderReviewArrows();
-    }, 250);
+    clearHighlights();
+    clearCheckHighlight();
+    highlightCheck(game.fen());
+
+    if ($reviewTryAgain) {
+      $reviewTryAgain.style.display = "";
+      $reviewTryAgain.textContent = "Reset Try";
+    }
+
+    if ($tryAgainStatus) {
+      if (verdict.startsWith("Good")) {
+        $tryAgainStatus.textContent = `${verdict} Click "Reset Try" to try for the best move.`;
+      } else {
+        $tryAgainStatus.textContent = `${verdict} Click "Reset Try" to go back and try again.`;
+      }
+    }
   }
 
   return true;
