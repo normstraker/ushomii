@@ -35,6 +35,10 @@ let review = {
   currentPly: 0,
   previewPly: null,
   running: false,
+
+  tryAgainMode: false,
+  tryAgainTargetPly: null, // the bad move ply we are re-solving
+  tryAgainFromFen: null, // position before the bad move
 };
 
 /* ============================================================================
@@ -81,7 +85,9 @@ const $evalGraph = document.getElementById("evalGraph");
 const $evalTooltip = document.getElementById("evalTooltip");
 const $reviewPrev = document.getElementById("reviewPrev");
 const $reviewNext = document.getElementById("reviewNext");
+const $reviewTryAgain = document.getElementById("reviewTryAgain");
 const $reviewExit = document.getElementById("reviewExit");
+const $tryAgainStatus = document.getElementById("tryAgainStatus");
 const $criticalList = document.getElementById("criticalList");
 const $bestLine = document.getElementById("bestLine");
 
@@ -1151,14 +1157,20 @@ async function maybeEnginePlays() {
    ============================================================================ */
 
 function onDragStart(source, piece) {
-  if (reviewMode) return false;
+  if (reviewMode && !review.tryAgainMode) return false;
   if ($clickToMove?.checked) return false;
-  if (game.isGameOver()) return false;
-  if (!isHumansTurn()) return false;
+  if (!review.tryAgainMode && game.isGameOver()) return false;
+  if (!review.tryAgainMode && !isHumansTurn()) return false;
 
-  const humanIsWhite = $playWhite.checked;
-  if (humanIsWhite && piece.startsWith("b")) return false;
-  if (!humanIsWhite && piece.startsWith("w")) return false;
+  if (review.tryAgainMode) {
+    const sideToMove = game.turn(); // 'w' or 'b'
+    if (sideToMove === "w" && piece.startsWith("b")) return false;
+    if (sideToMove === "b" && piece.startsWith("w")) return false;
+  } else {
+    const humanIsWhite = $playWhite.checked;
+    if (humanIsWhite && piece.startsWith("b")) return false;
+    if (!humanIsWhite && piece.startsWith("w")) return false;
+  }
 
   selectedSquare = source;
   highlightMovesFrom(source);
@@ -1175,18 +1187,26 @@ function onDrop(source, target) {
   const move = game.move({ from: source, to: target, promotion: "q" });
   if (move === null) return "snapback";
 
-  updateStatus();
-  renderMoveList();
-
   lastMove = { from: source, to: target };
   highlightLastMove(source, target);
+
+  clearHighlights();
+  selectedSquare = null;
+
+  if (review.tryAgainMode) {
+    setTimeout(() => {
+      board.position(game.fen(), true);
+      handleTryAgainMoveAttempt(move);
+    }, 0);
+    return;
+  }
+
+  updateStatus();
+  renderMoveList();
 
   // Persist after human drag move
   saveFenToStorage();
   savePgnToStorage();
-
-  clearHighlights();
-  selectedSquare = null;
 
   // IMPORTANT: do NOT analyze here (it would block engine move).
   // We'll analyze after engine replies (when it's the human's turn).
@@ -1298,6 +1318,7 @@ $reviewPrev?.addEventListener("click", () =>
 $reviewNext?.addEventListener("click", () =>
   gotoReviewPly(review.currentPly + 1),
 );
+$reviewTryAgain?.addEventListener("click", () => startTryAgainMode());
 $reviewExit?.addEventListener("click", () => exitReview());
 
 // Collapsible Review card
@@ -1471,10 +1492,10 @@ function initBoard() {
   boardEl.onclick = null;
 
   boardEl.addEventListener("click", e => {
-    if (reviewMode) return;
+    if (reviewMode && !review.tryAgainMode) return;
     if (!$clickToMove?.checked) return;
-    if (game.isGameOver()) return;
-    if (!isHumansTurn()) return;
+    if (!review.tryAgainMode && game.isGameOver()) return;
+    if (!review.tryAgainMode && !isHumansTurn()) return;
 
     e.stopPropagation();
 
@@ -1515,17 +1536,23 @@ function initBoard() {
     if (move === null) return;
 
     board.position(game.fen(), true);
-    updateStatus();
-    renderMoveList();
 
     lastMove = { from: selectedSquare, to: square };
     highlightLastMove(selectedSquare, square);
 
-    saveFenToStorage();
-    savePgnToStorage();
-
     clearHighlights();
     selectedSquare = null;
+
+    if (review.tryAgainMode) {
+      handleTryAgainMoveAttempt(move);
+      return;
+    }
+
+    updateStatus();
+    renderMoveList();
+
+    saveFenToStorage();
+    savePgnToStorage();
 
     engineReplyRequested = true;
     clearEngineReplyTimer();
@@ -1918,6 +1945,166 @@ function renderReviewArrows() {
 }
 
 /* ============================================================================
+   ===== TRY AGAIN MODE =======================================================
+   ============================================================================ */
+
+function getReviewMarkAtPly(plyIndex) {
+  return (review?.blunders || []).find(b => b.plyIndex === plyIndex) || null;
+}
+
+function resetTryAgainUi() {
+  review.tryAgainMode = false;
+  review.tryAgainTargetPly = null;
+  review.tryAgainFromFen = null;
+
+  if ($tryAgainStatus) {
+    $tryAgainStatus.style.display = "none";
+    $tryAgainStatus.textContent = "—";
+  }
+}
+
+function refreshTryAgainAvailability() {
+  if (!$reviewTryAgain) return;
+
+  if (!reviewMode || review.currentPly <= 0 || review.tryAgainMode) {
+    $reviewTryAgain.style.display = "none";
+    return;
+  }
+
+  const mark = getReviewMarkAtPly(review.currentPly);
+  $reviewTryAgain.style.display = mark ? "" : "none";
+}
+
+function startTryAgainMode() {
+  if (!reviewMode) return;
+  if (review.currentPly <= 0) return;
+
+  const mark = getReviewMarkAtPly(review.currentPly);
+  if (!mark) return;
+
+  const targetPly = review.currentPly;
+  const fenBefore = review.plys[targetPly - 1]?.fen;
+  if (!fenBefore) return;
+
+  review.tryAgainMode = true;
+  review.tryAgainTargetPly = targetPly;
+  review.tryAgainFromFen = fenBefore;
+  review.previewPly = null;
+
+  if (board) {
+    board.draggable = !$clickToMove?.checked;
+    if (board.cfg) board.cfg.draggable = board.draggable;
+  }
+
+  if (board) board.position(fenBefore, true);
+
+  clearHighlights();
+  clearLastMoveHighlight();
+  clearCheckHighlight();
+  highlightCheck(fenBefore);
+  renderReviewArrows();
+
+  if ($tryAgainStatus) {
+    $tryAgainStatus.style.display = "block";
+    $tryAgainStatus.textContent =
+      `Try Again: ${mark.label}. Find a better move for ` +
+      `${targetPly % 2 === 1 ? "White" : "Black"}.`;
+  }
+
+  if ($reviewTryAgain) $reviewTryAgain.style.display = "none";
+}
+
+function stopTryAgainMode() {
+  resetTryAgainUi();
+
+  if (board) {
+    board.draggable = false;
+    if (board.cfg) board.cfg.draggable = false;
+  }
+
+  refreshTryAgainAvailability();
+}
+
+async function handleTryAgainMoveAttempt(moveObj) {
+  if (!review.tryAgainMode) return false;
+
+  const targetPly = review.tryAgainTargetPly;
+  const fenBefore = review.tryAgainFromFen;
+  if (!targetPly || !fenBefore) return false;
+
+  const playedUci = `${moveObj.from}${moveObj.to}${moveObj.promotion || ""}`;
+
+  const e = review.evals?.[targetPly];
+  const bestUci = e?.bestMoveUci || null;
+
+  let verdict = "Try again.";
+  let done = false;
+
+  if (bestUci && playedUci === bestUci) {
+    verdict = "Excellent — that is the engine best move.";
+    done = true;
+  } else {
+    const q = await analyzeMoveQuality(fenBefore, playedUci, {
+      movetimeMs: 120,
+      targetDepth: 10,
+    });
+
+    const bestPov = toWhitePovCp(q.bestCp ?? 0, q.bestMate ?? null, fenBefore);
+
+    const tmpAfterFen = game.fen();
+    const playedPov = toWhitePovCp(
+      q.playedCp ?? 0,
+      q.playedMate ?? null,
+      tmpAfterFen,
+    );
+
+    const mover = targetPly % 2 === 1 ? "w" : "b";
+    const drop =
+      mover === "w"
+        ? Math.max(0, Math.round(bestPov - playedPov))
+        : Math.max(0, Math.round(playedPov - bestPov));
+
+    if (drop <= 35) {
+      verdict = "Good — very close to the best move.";
+      done = true;
+    } else if (drop <= 120) {
+      verdict = "Not bad, but there is a stronger move. Try again.";
+    } else {
+      verdict = "Try again — there is a clearly better move here.";
+    }
+  }
+
+  if ($tryAgainStatus) {
+    $tryAgainStatus.style.display = "block";
+    $tryAgainStatus.textContent = verdict;
+  }
+
+  if (done) {
+    review.tryAgainMode = false;
+    review.tryAgainTargetPly = null;
+    review.tryAgainFromFen = null;
+    refreshTryAgainAvailability();
+  } else {
+    // Reset board back to the training position
+    setTimeout(() => {
+      if (!review.tryAgainFromFen) return;
+      if (board) board.position(review.tryAgainFromFen, true);
+      try {
+        game.load(review.tryAgainFromFen);
+      } catch (_) {}
+
+      clearHighlights();
+      clearLastMoveHighlight();
+      clearCheckHighlight();
+      highlightCheck(review.tryAgainFromFen);
+      renderReviewArrows();
+    }, 250);
+  }
+
+  return true;
+}
+
+/* ============================================================================
    ===== POST-GAME REVIEW MODE ================================================
    ============================================================================ */
 
@@ -1935,7 +2122,9 @@ function setReviewMode(on) {
 
   // Lock the board from interaction in review mode
   if (board) {
-    board.draggable = !reviewMode && !$clickToMove?.checked;
+    board.draggable =
+      (!reviewMode && !$clickToMove?.checked) ||
+      (reviewMode && review.tryAgainMode && !$clickToMove?.checked);
     if (board.cfg) board.cfg.draggable = board.draggable;
   }
 
@@ -2886,6 +3075,11 @@ function highlightPreviewMoveRow(plyIndex) {
 
 function gotoReviewPly(index) {
   index = Math.max(0, Math.min(review.plys.length - 1, index));
+
+  if (review.tryAgainMode) {
+    stopTryAgainMode();
+  }
+
   review.currentPly = index;
 
   const fen = review.plys[index].fen;
@@ -2903,6 +3097,7 @@ function gotoReviewPly(index) {
 
   updateBestLinePanel();
   highlightCurrentReviewMoveRow();
+  refreshTryAgainAvailability();
 }
 
 async function startPostGameReview() {
@@ -2910,6 +3105,7 @@ async function startPostGameReview() {
   if (!sf) return;
 
   review.running = true;
+  resetTryAgainUi();
   setReviewMode(true);
   setReviewOpen(true);
 
@@ -3046,12 +3242,14 @@ async function startPostGameReview() {
   renderCriticalList();
   renderReviewMovesList();
   gotoReviewPly(review.currentPly);
+  refreshTryAgainAvailability();
 
   review.running = false;
 }
 
 function exitReview() {
   review.running = false;
+  stopTryAgainMode();
   setReviewMode(false);
   clearReviewArrows();
 
