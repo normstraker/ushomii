@@ -136,20 +136,27 @@
                 <button id="newGame">New Game</button>
                 <button id="undo">Undo</button>
                 <button id="flip">Flip</button>
-                <button id="reviewGame" style="display: none">
-                  Review Game
-                </button>
               </div>
             </div>
           </div>
 
           <div class="card is-collapsed" id="reviewCard">
             <button
-              class="card-title collapsible"
+              class="card-title collapsible review-titlebar"
               id="reviewToggle"
               type="button"
             >
-              Review <span class="chev" id="reviewChev">▸</span>
+              <span>Review</span>
+              <span class="review-title-actions">
+                <span
+                  id="reviewReadyBadge"
+                  class="review-ready-badge"
+                  style="display: none"
+                >
+                  Review Game
+                </span>
+                <span class="chev" id="reviewChev">▸</span>
+              </span>
             </button>
 
             <div class="collapsible-body" id="reviewBody">

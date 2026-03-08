@@ -375,6 +375,25 @@ body {
   cursor: pointer;
 }
 
+.review-titlebar {
+  align-items: center;
+}
+
+.review-title-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.review-ready-badge {
+  font-size: 12px;
+  color: var(--text);
+  border: 1px solid rgba(0, 255, 120, 0.35);
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: rgba(0, 255, 120, 0.08);
+}
+
 .card-title.collapsible:focus {
   outline: 2px solid rgba(0, 0, 0, 0.2);
   outline-offset: 4px;
@@ -385,7 +404,11 @@ body {
    ========================================================= */
 
 #reviewCard .collapsible-body {
-  max-height: 600px;
+  max-height: min(600px, 70dvh);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  padding-right: 12px;
 }
 
 #evalGraph {
@@ -1167,9 +1190,14 @@ html[data-ui="light"] select option {
   /* Panel is the only scroll container in side-by-side mode */
   #movesBody,
   #debugBody,
-  #themeBody .theme-body,
-  #reviewCard .collapsible-body {
+  #themeBody .theme-body {
     max-height: none;
     overflow: visible;
+  }
+
+  #reviewCard .collapsible-body {
+    max-height: min(520px, 58dvh);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }

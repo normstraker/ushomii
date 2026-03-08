@@ -77,6 +77,7 @@ const $uiTheme = document.getElementById("uiTheme");
 const $analysisMode = document.getElementById("analysisMode");
 const $analysisLine = document.getElementById("analysisLine");
 const $reviewGame = document.getElementById("reviewGame");
+const $reviewReadyBadge = document.getElementById("reviewReadyBadge");
 const $reviewCard = document.getElementById("reviewCard");
 const $reviewToggle = document.getElementById("reviewToggle");
 const $reviewBody = document.getElementById("reviewBody");
@@ -1040,12 +1041,15 @@ function updateStatus() {
 
   ensureEngineInline();
 
-  // Show Review button only when game is over
+  // Show Review badge only when game is over
   if ($reviewGame) {
-    $reviewGame.style.display = isOver ? "" : "none";
+    $reviewGame.style.display = "none";
+  }
+  if ($reviewReadyBadge) {
+    $reviewReadyBadge.style.display = isOver ? "" : "none";
   }
 
-  // Keep review card hidden unless actively reviewing
+  // Keep review card collapsed unless actively reviewing
   if (!reviewMode) setReviewOpen(false);
 
   // Re-apply red highlight (uses compatibility logic below)
@@ -1315,8 +1319,6 @@ $analysisMode?.addEventListener("change", () => {
   saveSettingsToStorage();
 });
 
-$reviewGame?.addEventListener("click", () => startPostGameReview());
-
 $reviewPrev?.addEventListener("click", () =>
   gotoReviewPly(review.currentPly - 1),
 );
@@ -1333,11 +1335,62 @@ $reviewTryAgain?.addEventListener("click", () => {
 $reviewExit?.addEventListener("click", () => exitReview());
 
 // Collapsible Review card
-$reviewToggle?.addEventListener("click", () => {
-  const nowOpen = !$reviewCard.classList.contains("is-open");
-  $reviewCard.classList.toggle("is-open", nowOpen);
-  $reviewCard.classList.toggle("is-collapsed", !nowOpen);
-  afterLayoutChange();
+$reviewToggle?.addEventListener("click", async () => {
+  const isOpen = $reviewCard.classList.contains("is-open");
+
+  // If already in review mode, just toggle open/closed
+  if (reviewMode) {
+    const nowOpen = !isOpen;
+    $reviewCard.classList.toggle("is-open", nowOpen);
+    $reviewCard.classList.toggle("is-collapsed", !nowOpen);
+    afterLayoutChange();
+    return;
+  }
+
+  // If not in review mode, only launch review when game is over
+  const inCheck =
+    typeof game.isCheck === "function"
+      ? game.isCheck()
+      : typeof game.inCheck === "function"
+        ? game.inCheck()
+        : typeof game.in_check === "function"
+          ? game.in_check()
+          : false;
+
+  const inMate =
+    typeof game.isCheckmate === "function"
+      ? game.isCheckmate()
+      : typeof game.isCheckMate === "function"
+        ? game.isCheckMate()
+        : typeof game.in_checkmate === "function"
+          ? game.in_checkmate()
+          : false;
+
+  const isDraw =
+    typeof game.isDraw === "function"
+      ? game.isDraw()
+      : typeof game.inDraw === "function"
+        ? game.inDraw()
+        : typeof game.in_draw === "function"
+          ? game.in_draw()
+          : false;
+
+  const isOver =
+    typeof game.isGameOver === "function"
+      ? game.isGameOver()
+      : typeof game.game_over === "function"
+        ? game.game_over()
+        : inMate || isDraw;
+
+  if (!isOver) {
+    const nowOpen = !isOpen;
+    $reviewCard.classList.toggle("is-open", nowOpen);
+    $reviewCard.classList.toggle("is-collapsed", !nowOpen);
+    afterLayoutChange();
+    return;
+  }
+
+  await startPostGameReview();
 });
 
 // Opponent Strength collapsible
