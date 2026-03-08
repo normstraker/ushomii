@@ -597,13 +597,50 @@ function isHumanPieceOn(square) {
   return piece.color === humanColor;
 }
 
-function clearLastMoveHighlight() {
-  $("#board .square-55d63").removeClass("square-last-from square-last-to");
+function getBoardSquareEl(square) {
+  if (!square) return null;
+
+  // Prefer direct square class used by chessboard.js, e.g. "square-e4"
+  let el = document.querySelector(`#board .square-${square}`);
+
+  // Fallback for builds that expose data-square
+  if (!el) {
+    el = document.querySelector(
+      `#board .square-55d63[data-square="${square}"]`,
+    );
+  }
+
+  return el;
 }
+
+function clearLastMoveHighlight() {
+  document
+    .querySelectorAll("#board .square-last-from, #board .square-last-to")
+    .forEach(el => el.classList.remove("square-last-from", "square-last-to"));
+}
+
 function highlightLastMove(from, to) {
   clearLastMoveHighlight();
-  $(`#board .square-55d63[data-square="${from}"]`).addClass("square-last-from");
-  $(`#board .square-55d63[data-square="${to}"]`).addClass("square-last-to");
+
+  const fromEl = getBoardSquareEl(from);
+  const toEl = getBoardSquareEl(to);
+
+  if (fromEl) fromEl.classList.add("square-last-from");
+  if (toEl) toEl.classList.add("square-last-to");
+}
+
+function reapplyBoardOverlays(fenOverride = null) {
+  if (lastMove) {
+    highlightLastMove(lastMove.from, lastMove.to);
+  } else {
+    clearLastMoveHighlight();
+  }
+
+  highlightCheck(fenOverride || game.fen());
+
+  if (reviewMode) {
+    renderReviewArrows();
+  }
 }
 
 function clearCheckHighlight() {
@@ -1151,7 +1188,11 @@ async function maybeEnginePlays() {
     renderMoveList();
 
     lastMove = { from, to };
-    highlightLastMove(from, to);
+
+    // Repaint after the board animation/render settles
+    setTimeout(() => {
+      reapplyBoardOverlays(game.fen());
+    }, 0);
 
     saveFenToStorage();
     savePgnToStorage();
@@ -1197,7 +1238,6 @@ function onDrop(source, target) {
   if (move === null) return "snapback";
 
   lastMove = { from: source, to: target };
-  highlightLastMove(source, target);
 
   clearHighlights();
   selectedSquare = null;
@@ -1225,9 +1265,8 @@ function onDrop(source, target) {
 function onSnapEnd() {
   board.position(game.fen(), true);
 
-  // Re-apply overlays AFTER the redraw:
-  if (lastMove) highlightLastMove(lastMove.from, lastMove.to);
-  highlightCheck(); // uses game.fen()
+  // Re-apply overlays AFTER the redraw
+  reapplyBoardOverlays(game.fen());
 
   if (engineReplyRequested) {
     engineReplyRequested = false;
@@ -1420,7 +1459,9 @@ $undo.addEventListener("click", () => {
   board.position(game.fen(), true);
   updateStatus();
   renderMoveList();
-  clearLastMoveHighlight();
+
+  lastMove = { from: selectedSquare, to: square };
+  reapplyBoardOverlays(game.fen());
 
   saveFenToStorage();
   savePgnToStorage();
@@ -1802,11 +1843,23 @@ function initThemeControls() {
   ];
 
   handlers.forEach(el => {
-    el.addEventListener("input", () => applyAndSaveThemeFromInputs());
+    const apply = () => {
+      applyAndSaveThemeFromInputs();
+
+      // Repaint currently visible highlights immediately
+      reapplyBoardOverlays(game.fen());
+    };
+
+    el.addEventListener("input", apply);
+    el.addEventListener("change", apply);
   });
 
   if ($themeReset) {
-    $themeReset.addEventListener("click", () => resetThemeToDefaults());
+    $themeReset.addEventListener("click", () => {
+      resetThemeToDefaults();
+
+      reapplyBoardOverlays(game.fen());
+    });
   }
 }
 
